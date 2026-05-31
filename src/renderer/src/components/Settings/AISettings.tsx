@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Eye, EyeOff, ExternalLink, Loader2, Check, Trash2, Plus, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
+import { ExternalLink, Loader2, Check, Trash2, Plus, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PROVIDERS } from '@/lib/ai'

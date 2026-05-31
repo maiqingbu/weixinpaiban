@@ -22,22 +22,31 @@ export interface GenerateContentResult {
 }
 
 /**
- * 联网搜索相关内容
+ * 从自由模式 prompt 中提取搜索关键词（取前 50 字作为搜索查询）
  */
-async function searchWeb(topic: string, keywords?: string[]): Promise<string> {
-  const query = [topic, ...(keywords || [])].filter(Boolean).join(' ')
-  if (!query.trim()) return ''
+function extractSearchQuery(prompt: string): string {
+  return prompt.replace(/\s+/g, ' ').trim().slice(0, 50)
+}
+
+/**
+ * 联网搜索相关内容
+ * @returns { context, error } — context 为搜索结果文本，error 为失败原因
+ */
+async function searchWeb(query: string): Promise<{ context: string; error?: string }> {
+  if (!query.trim()) return { context: '', error: '未提供搜索关键词' }
 
   try {
     const resp = await window.api.tavilySearch(query, 5)
-    if (resp.error || !resp.results?.length) return ''
+    if (resp.error) return { context: '', error: resp.error }
+    if (!resp.results?.length) return { context: '', error: '未找到相关资料' }
 
     const lines = resp.results.map((r, i) =>
       `[${i + 1}] ${r.title}\n来源: ${r.url}\n摘要: ${r.content}`
     )
-    return lines.join('\n\n')
-  } catch {
-    return ''
+    return { context: lines.join('\n\n') }
+  } catch (e: unknown) {
+    const err = e as Error
+    return { context: '', error: err.message || '网络请求失败' }
   }
 }
 
@@ -54,8 +63,19 @@ export function generateContent(opts: GenerateContentOptions): GenerateContentRe
     // 联网搜索
     let searchContext = ''
     if (enableWebSearch) {
+      const searchQuery = config.mode === 'freeform'
+        ? extractSearchQuery(config.prompt || '')
+        : [config.topic || '', ...(config.keywords || [])].filter(Boolean).join(' ')
+
       onStatus?.('正在联网搜索相关资料…')
-      searchContext = await searchWeb(config.topic || '', config.keywords)
+      const result = await searchWeb(searchQuery)
+      if (result.error) {
+        onStatus?.(`联网搜索：${result.error}，将基于模型知识生成`)
+        await new Promise(r => setTimeout(r, 2000))
+      } else if (result.context) {
+        searchContext = result.context
+        onStatus?.('已获取网络资料，准备生成…')
+      }
     }
 
     onStatus?.('正在生成内容…')

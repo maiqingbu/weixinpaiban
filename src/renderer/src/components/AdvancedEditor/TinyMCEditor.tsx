@@ -105,8 +105,8 @@ function TinyMCEditor({ initialContent, onChange }: AdvancedEditorProps): React.
         tinymceScriptSrc="/tinymce/tinymce.min.js"
         onInit={handleInit}
         initialValue={initialContent || ''}
+        licenseKey="gpl"
         init={{
-          license_key: 'gpl',
           base_url: new URL('/tinymce/', window.location.origin).href,
           base_path: new URL('/tinymce/', window.location.origin).href,
           suffix: '.min',

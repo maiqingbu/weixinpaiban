@@ -4,6 +4,7 @@ interface Article {
   id: number
   title: string
   content: string
+  advanced_content: string
   theme_id: string | null
   summary: string
   cover_image: string
@@ -41,7 +42,7 @@ interface Api {
   articleList: () => Promise<Article[]>
   articleCreate: () => Promise<Article>
   articleGet: (id: number) => Promise<Article | null>
-  articleUpdate: (id: number, data: { title?: string; content?: string; theme_id?: string; summary?: string; read_more_url?: string; read_more_text?: string }) => Promise<Article>
+  articleUpdate: (id: number, data: { title?: string; content?: string; advanced_content?: string; theme_id?: string; summary?: string; read_more_url?: string; read_more_text?: string }) => Promise<Article>
   articleDelete: (id: number) => Promise<boolean>
   importOpenFile: (filters: FileFilter[]) => Promise<string | null>
   importWord: (filePath: string) => Promise<ImportResult>

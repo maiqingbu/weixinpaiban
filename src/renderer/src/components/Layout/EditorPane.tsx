@@ -52,11 +52,6 @@ function EditorPane(): React.JSX.Element {
     window.api.editorOpen(advancedInitialContent)
   }, [advancedInitialContent])
 
-  // 标准编辑器内容变化
-  const handleEditorChange = useCallback((html: string) => {
-    setEditorContent(html)
-  }, [setEditorContent])
-
   return (
     <div className="flex h-full flex-col bg-background">
       {/* 工具栏 */}
@@ -74,7 +69,7 @@ function EditorPane(): React.JSX.Element {
 
       {/* 标准编辑器 */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        <Editor editor={editor} onChange={handleEditorChange} />
+        <Editor editor={editor} />
       </div>
     </div>
   )

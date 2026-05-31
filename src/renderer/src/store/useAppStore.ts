@@ -57,6 +57,7 @@ interface AppState {
   currentArticleTitle: string
   editorContent: string
   advancedEditorContent: string
+  advancedEditorDesign: Record<string, any> | null
   /** 当前激活的编辑器：'richtext' 或 'advanced' */
   activeEditor: EditorMode
   currentThemeId: string
@@ -71,6 +72,7 @@ interface AppState {
   updateArticle: (id: number, fields: Partial<Article>) => void
   setEditorContent: (html: string) => void
   setAdvancedEditorContent: (html: string) => void
+  setAdvancedEditorDesign: (design: Record<string, any> | null) => void
   setActiveEditor: (mode: EditorMode) => void
   setCurrentThemeId: (id: string) => void
   setCurrentTheme: (theme: Theme) => void
@@ -90,6 +92,7 @@ const useAppStore = create<AppState>()(
       currentArticleTitle: '',
       editorContent: '',
       advancedEditorContent: '',
+      advancedEditorDesign: null,
       activeEditor: 'richtext' as EditorMode,
       currentThemeId: 'original',
       currentTheme: null,
@@ -114,6 +117,7 @@ const useAppStore = create<AppState>()(
         })),
       setEditorContent: (html) => set({ editorContent: html }),
       setAdvancedEditorContent: (html) => set({ advancedEditorContent: html }),
+      setAdvancedEditorDesign: (design) => set({ advancedEditorDesign: design }),
       setActiveEditor: (mode) => set({ activeEditor: mode }),
       setCurrentThemeId: (id) => set({ currentThemeId: id }),
       setCurrentTheme: (theme) => set({ currentTheme: theme }),

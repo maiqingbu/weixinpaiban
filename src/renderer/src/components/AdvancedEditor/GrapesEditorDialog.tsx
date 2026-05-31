@@ -56,10 +56,10 @@ function GrapesEditorDialog({ open, onClose, initialContent, onSave }: GrapesEdi
               open: true,
               buildProps: ['display', 'flex-direction', 'justify-content', 'align-items', 'gap', 'padding', 'margin'],
               properties: [
-                { name: 'display', list: [{ value: 'block', name: '块级' }, { value: 'flex', name: '弹性' }, { value: 'grid', name: '网格' }, { value: 'inline', name: '行内' }] },
-                { name: 'flex-direction', list: [{ value: 'row', name: '水平' }, { value: 'column', name: '垂直' }] },
-                { name: 'justify-content', list: [{ value: 'flex-start', name: '左对齐' }, { value: 'center', name: '居中' }, { value: 'flex-end', name: '右对齐' }, { value: 'space-between', name: '两端对齐' }] },
-                { name: 'align-items', list: [{ value: 'flex-start', name: '顶部' }, { value: 'center', name: '居中' }, { value: 'flex-end', name: '底部' }, { value: 'stretch', name: '拉伸' }] },
+                { name: 'display', list: [{ id: 'block', value: 'block', name: '块级' }, { id: 'flex', value: 'flex', name: '弹性' }, { id: 'grid', value: 'grid', name: '网格' }, { id: 'inline', value: 'inline', name: '行内' }] },
+                { name: 'flex-direction', list: [{ id: 'row', value: 'row', name: '水平' }, { id: 'column', value: 'column', name: '垂直' }] },
+                { name: 'justify-content', list: [{ id: 'flex-start', value: 'flex-start', name: '左对齐' }, { id: 'center', value: 'center', name: '居中' }, { id: 'flex-end', value: 'flex-end', name: '右对齐' }, { id: 'space-between', value: 'space-between', name: '两端对齐' }] },
+                { name: 'align-items', list: [{ id: 'flex-start', value: 'flex-start', name: '顶部' }, { id: 'center', value: 'center', name: '居中' }, { id: 'flex-end', value: 'flex-end', name: '底部' }, { id: 'stretch', value: 'stretch', name: '拉伸' }] },
               ],
             },
             {
@@ -72,8 +72,8 @@ function GrapesEditorDialog({ open, onClose, initialContent, onSave }: GrapesEdi
               open: false,
               buildProps: ['font-family', 'font-size', 'font-weight', 'color', 'line-height', 'text-align', 'letter-spacing'],
               properties: [
-                { name: 'text-align', list: [{ value: 'left', name: '左对齐' }, { value: 'center', name: '居中' }, { value: 'right', name: '右对齐' }, { value: 'justify', name: '两端对齐' }] },
-                { name: 'font-weight', list: [{ value: '400', name: '正常' }, { value: '500', name: '中等' }, { value: '600', name: '半粗' }, { value: '700', name: '粗体' }] },
+                { name: 'text-align', list: [{ id: 'left', value: 'left', name: '左对齐' }, { id: 'center', value: 'center', name: '居中' }, { id: 'right', value: 'right', name: '右对齐' }, { id: 'justify', value: 'justify', name: '两端对齐' }] },
+                { name: 'font-weight', list: [{ id: '400', value: '400', name: '正常' }, { id: '500', value: '500', name: '中等' }, { id: '600', value: '600', name: '半粗' }, { id: '700', value: '700', name: '粗体' }] },
               ],
             },
             {
@@ -86,7 +86,7 @@ function GrapesEditorDialog({ open, onClose, initialContent, onSave }: GrapesEdi
               open: false,
               buildProps: ['border', 'border-width', 'border-style', 'border-color'],
               properties: [
-                { name: 'border-style', list: [{ value: 'solid', name: '实线' }, { value: 'dashed', name: '虚线' }, { value: 'dotted', name: '点线' }, { value: 'none', name: '无' }] },
+                { name: 'border-style', list: [{ id: 'solid', value: 'solid', name: '实线' }, { id: 'dashed', value: 'dashed', name: '虚线' }, { id: 'dotted', value: 'dotted', name: '点线' }, { id: 'none', value: 'none', name: '无' }] },
               ],
             },
           ],

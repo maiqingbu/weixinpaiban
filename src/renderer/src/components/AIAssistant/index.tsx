@@ -29,11 +29,19 @@ function AIAssistant({ editor }: AIAssistantProps): React.JSX.Element {
   const [dialogType, setDialogType] = useState<DialogType>(null)
   const [configured, setConfigured] = useState(false)
 
-  useEffect(() => {
+  const checkConfigured = useCallback(() => {
     window.api?.aiListConfigured?.().then((list) => {
       setConfigured(list && list.length > 0)
     })
   }, [])
+
+  useEffect(() => { checkConfigured() }, [checkConfigured])
+
+  // Listen for ai-config-changed event (fired when user saves/removes API key in settings)
+  useEffect(() => {
+    window.addEventListener('ai-config-changed', checkConfigured)
+    return () => window.removeEventListener('ai-config-changed', checkConfigured)
+  }, [checkConfigured])
 
   // Listen for external request to open title dialog
   useEffect(() => {

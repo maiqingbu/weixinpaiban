@@ -53,7 +53,7 @@ export function registerEditorWindowHandlers(): void {
     }
   })
 
-  ipcMain.on('editor:save', (event, html: string) => {
+  ipcMain.on('editor:save', (_event, html: string) => {
     const mainWindow = BrowserWindow.getAllWindows().find(w => w !== editorWindow && !w.isDestroyed())
     if (mainWindow) {
       mainWindow.webContents.send('editor:saved', html)
@@ -61,7 +61,7 @@ export function registerEditorWindowHandlers(): void {
   })
 
   // 主窗口推送内容更新到编辑器窗口
-  ipcMain.on('editor:push-content', (event, html: string) => {
+  ipcMain.on('editor:push-content', (_event, html: string) => {
     if (editorWindow && !editorWindow.isDestroyed()) {
       editorWindow.webContents.send('editor:set-content', html)
     }

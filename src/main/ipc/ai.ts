@@ -25,7 +25,7 @@ const BUILTIN_API_BASES: Record<string, string> = {
 }
 
 const BUILTIN_DEFAULT_MODELS: Record<string, string> = {
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-v4-pro',
   qwen: 'qwen-plus',
   doubao: 'doubao-pro-32k',
   zhipu: 'glm-4-flash',
