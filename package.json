@@ -13,12 +13,13 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "prebuild": "rm -rf node_modules/fabric/node_modules/canvas",
+    "build": "npm run typecheck && npm run prebuild && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "electron-vite build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:win": "npm run prebuild && electron-vite build && electron-builder --win",
+    "build:mac": "npm run prebuild && electron-vite build && electron-builder --mac",
+    "build:linux": "npm run prebuild && electron-vite build && electron-builder --linux",
     "package": "npm run build && electron-builder"
   },
   "dependencies": {
