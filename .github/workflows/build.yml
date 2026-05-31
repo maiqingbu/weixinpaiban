@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Remove canvas before rebuild
+        run: rm -rf node_modules/fabric/node_modules/canvas
+
       - name: Build for macOS
         run: npm run build:mac
 
