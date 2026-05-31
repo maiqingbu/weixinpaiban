@@ -23,10 +23,10 @@ function EditorPane(): React.JSX.Element {
 
   // 当文章切换时，推送内容到编辑器窗口
   useEffect(() => {
-    if (advancedEditorContent) {
-      window.api.editorPushContent(advancedEditorContent)
+    if (advancedInitialContent) {
+      window.api.editorPushContent(advancedInitialContent)
     }
-  }, [advancedEditorContent])
+  }, [advancedInitialContent])
 
   // 监听编辑器窗口保存的内容
   useEffect(() => {
