@@ -1,0 +1,226 @@
+/* GrapesJS 自定义样式 - 中文化 + 高对比度 */
+
+/* 组件块样式 */
+.gjs-blocks-c {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 6px !important;
+  padding: 8px !important;
+}
+
+.gjs-block {
+  border: 2px solid #d1d5db !important;
+  border-radius: 8px !important;
+  padding: 10px 6px !important;
+  min-height: 55px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: white !important;
+  cursor: grab !important;
+  transition: all 0.15s ease !important;
+}
+
+.gjs-block:hover {
+  border-color: #2563eb !important;
+  background: #eff6ff !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15) !important;
+  transform: translateY(-1px) !important;
+}
+
+.gjs-block svg {
+  width: 28px !important;
+  height: 28px !important;
+  margin-bottom: 6px !important;
+  color: #374151 !important;
+}
+
+.gjs-block-label {
+  font-size: 11px !important;
+  color: #1f2937 !important;
+  font-weight: 500 !important;
+  margin-top: 2px !important;
+  text-align: center !important;
+}
+
+/* 分类标题 */
+.gjs-block-category {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: #111827 !important;
+  padding: 10px 6px 6px !important;
+  border-bottom: 2px solid #e5e7eb !important;
+  margin-bottom: 8px !important;
+  background: #f9fafb !important;
+  border-radius: 4px 4px 0 0 !important;
+}
+
+.gjs-block-category .gjs-title {
+  padding: 0 !important;
+}
+
+/* 样式管理器 */
+.gjs-sm-sector {
+  border-bottom: 2px solid #e5e7eb !important;
+  margin-bottom: 2px !important;
+}
+
+.gjs-sm-title {
+  background: #f3f4f6 !important;
+  padding: 10px 12px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #111827 !important;
+  cursor: pointer !important;
+  border-radius: 4px !important;
+  margin: 2px !important;
+}
+
+.gjs-sm-title:hover {
+  background: #e5e7eb !important;
+}
+
+.gjs-sm-properties {
+  padding: 10px !important;
+  background: white !important;
+}
+
+.gjs-sm-property {
+  margin-bottom: 10px !important;
+}
+
+.gjs-sm-label {
+  font-size: 12px !important;
+  color: #374151 !important;
+  font-weight: 500 !important;
+  margin-bottom: 4px !important;
+  display: block !important;
+}
+
+.gjs-field {
+  border: 2px solid #9ca3af !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  color: #111827 !important;
+  background: white !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.gjs-field:focus-within {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2) !important;
+  outline: none !important;
+}
+
+.gjs-field input,
+.gjs-field select {
+  color: #111827 !important;
+  font-size: 13px !important;
+}
+
+/* 颜色选择器 */
+.gjs-field-colorp {
+  border: 2px solid #9ca3af !important;
+  border-radius: 6px !important;
+}
+
+.gjs-field-colorp .gjs-colorp-c {
+  border-radius: 4px !important;
+}
+
+/* 图层管理器 */
+.gjs-layer-name {
+  font-size: 13px !important;
+  color: #111827 !important;
+  font-weight: 500 !important;
+}
+
+.gjs-layer-vis {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+.gjs-layers {
+  padding: 6px !important;
+}
+
+.gjs-layer {
+  padding: 6px 8px !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  border-radius: 4px !important;
+  margin-bottom: 2px !important;
+}
+
+.gjs-layer.gjs-hovered {
+  background: #eff6ff !important;
+}
+
+.gjs-layer.gjs-selected {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+}
+
+/* 编辑器画布 */
+.gjs-cv-canvas {
+  border: none !important;
+  background: #f9fafb !important;
+}
+
+.gjs-frame {
+  background: white !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* 选中元素高亮 */
+.gjs-highlighter {
+  outline: 3px solid #2563eb !important;
+  outline-offset: 2px !important;
+}
+
+.gjs-hovered {
+  outline: 2px dashed #60a5fa !important;
+  outline-offset: 1px !important;
+}
+
+/* 工具栏 */
+.gjs-toolbar {
+  background: #1f2937 !important;
+  border-radius: 8px !important;
+  padding: 4px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.gjs-toolbar-item {
+  color: white !important;
+  padding: 6px 10px !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+}
+
+.gjs-toolbar-item:hover {
+  background: #374151 !important;
+}
+
+/* 占位符 */
+.gjs-placeholder {
+  border: 2px dashed #60a5fa !important;
+  background: rgba(96, 165, 250, 0.1) !important;
+  border-radius: 4px !important;
+}
+
+/* 选中组件的操作栏 */
+.gjs-resizer-h {
+  border: 2px solid #2563eb !important;
+}
+
+.gjs-com-badge {
+  background: #2563eb !important;
+  color: white !important;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+}

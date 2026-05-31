@@ -1,0 +1,635 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { BubbleMenu } from '@tiptap/react/menus'
+import { EditorContent as TipTapEditorContent } from '@tiptap/react'
+import type { Editor as TipTapEditor } from '@tiptap/react'
+import { DOMSerializer } from 'prosemirror-model'
+import { DragHandle } from '@tiptap/extension-drag-handle-react'
+import { TableBubbleMenuContent } from './toolbar/TableBubbleMenu'
+import { ColumnsToolbar } from './extensions/ColumnsToolbar'
+import { AIActionButton, AIOutputPanel } from '@/components/AIBubbleMenu'
+import { Toolbar } from './toolbar/Toolbar'
+import { StatusBar } from '@/components/StatusBar'
+import { BlockMenu } from './extensions/BlockMenu'
+import { checkTypos, checkSensitive, computeStats, type TypoIssue, type SensitiveIssue, type ArticleStats, type LinkCheckResult } from '@/lib/linter'
+import { getStoredFile, deleteStoredFile } from './extensions/ImageUpload'
+import type { LintIssue } from './extensions/LintHighlight'
+import { jumpToLintIssue } from './extensions/LintHighlight'
+import { useAppStore } from '@/store/useAppStore'
+import { UploadStatus } from '@/components/UploadStatus'
+import { SaveMaterialDialog } from '@/components/MaterialPanel/SaveMaterialDialog'
+import ImageEditorModal from '@/components/ImageEditorModal'
+import { FindReplacePanel } from '@/components/FindReplace'
+
+/**
+ * 用 ProseMirror 序列化器将选区内容转为 HTML。
+ * 比 window.getSelection().cloneContents() 更可靠：
+ * - 使用 <section> 标签（而非 React NodeView 的 <div>）
+ * - 保留 data-widths、data-layout 等结构属性
+ * - 正确处理 templateBlock、columnsContainer 等自定义节点
+ */
+function serializeSelection(editor: TipTapEditor): string {
+  const { from, to } = editor.state.selection
+  const fragment = editor.state.doc.slice(from, to).content
+  const serializer = DOMSerializer.fromSchema(editor.state.schema)
+  const wrap = document.createElement('div')
+  fragment.forEach((node) => {
+    const dom = serializer.serializeNode(node)
+    wrap.appendChild(dom)
+  })
+  return wrap.innerHTML
+}
+
+async function getUploadConfig(): Promise<{ providerId: string; config: Record<string, string> } | null> {
+  try {
+    const activeProvider = await window.api?.imageHostGetSetting('active_provider')
+    if (!activeProvider || activeProvider === 'none') return null
+    const config = await window.api?.imageHostGetConfig(activeProvider)
+    if (!config) return null
+    return { providerId: activeProvider, config }
+  } catch {
+    return null
+  }
+}
+
+interface EditorProps {
+  editor: TipTapEditor | null
+}
+
+function Editor({ editor }: EditorProps): React.JSX.Element {
+  const [stats, setStats] = useState<ArticleStats | null>(null)
+  const [typos, setTypos] = useState<TypoIssue[]>([])
+  const [sensitive, setSensitive] = useState<SensitiveIssue[]>([])
+  const [ignoreList, setIgnoreList] = useState<Set<string>>(new Set())
+  const [linkResults, setLinkResults] = useState<LinkCheckResult[]>([])
+  const [linkChecking, setLinkChecking] = useState(false)
+  const [base64Count, setBase64Count] = useState(0)
+  const [uploadingBase64, setUploadingBase64] = useState(false)
+  const lintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 右键菜单状态
+  const [ctxMenuVisible, setCtxMenuVisible] = useState(false)
+  const [ctxMenuPos, setCtxMenuPos] = useState({ x: 0, y: 0 })
+  const [ctxMenuHtml, setCtxMenuHtml] = useState('')
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveDialogHtml, setSaveDialogHtml] = useState('')
+  const ctxMenuRef = useRef<HTMLDivElement>(null)
+
+  // 图片编辑器状态
+  const [imageEditorOpen, setImageEditorOpen] = useState(false)
+  const [imageEditorSrc, setImageEditorSrc] = useState('')
+  const [imageEditorInitialTool, setImageEditorInitialTool] = useState<'select' | 'crop'>('select')
+
+  // 查找替换状态
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false)
+  const [findReplaceMode, setFindReplaceMode] = useState(false) // false = find only, true = find+replace
+
+  // Save editor instance to store for AIAssistant access
+  useEffect(() => {
+    if (editor) useAppStore.getState().setEditorInstance(editor as any)
+  }, [editor])
+
+  // 监听图片编辑事件（来自 ImageEditExtension / TemplateBlock / document-level dblclick）
+
+  // 查找替换快捷键
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        setFindReplaceOpen(true)
+        setFindReplaceMode(false)
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'h') {
+        e.preventDefault()
+        setFindReplaceOpen(true)
+        setFindReplaceMode(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // 监听来自 TopBar 的查找替换事件
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      setFindReplaceOpen(true)
+      setFindReplaceMode(detail?.replace ?? false)
+    }
+    window.addEventListener('open-find-replace', handler)
+    return () => window.removeEventListener('open-find-replace', handler)
+  }, [])
+  const [imageEditorPos, setImageEditorPos] = useState(0)
+  useEffect(() => {
+    /** 打开图片编辑器的通用逻辑 */
+    const openImageEditor = (e: Event, initialTool: 'select' | 'crop') => {
+      const detail = (e as CustomEvent<{ src: string; element?: HTMLElement }>).detail
+      if (!detail?.src) return
+
+      setImageEditorSrc(detail.src)
+      setImageEditorInitialTool(initialTool)
+      let posFound = false
+
+      // 方法1：通过 DOM 元素计算位置
+      if (editor && detail.element) {
+        try {
+          const pos = editor.view.posAtDOM(detail.element, 0)
+          if (pos != null && pos > 0) {
+            setImageEditorPos(pos)
+            posFound = true
+          }
+        } catch { /* ignore */ }
+      }
+
+      // 方法2：按 src 匹配文档中的图片节点
+      if (!posFound && editor) {
+        editor.state.doc.descendants((node, pos) => {
+          if (posFound) return false
+          if (node.type.name === 'image' && node.attrs.src === detail.src) {
+            setImageEditorPos(pos)
+            posFound = true
+            return false
+          }
+          return true
+        })
+      }
+
+      setImageEditorOpen(true)
+    }
+
+    const onEdit = (e: Event) => openImageEditor(e, 'select')
+    const onCrop = (e: Event) => openImageEditor(e, 'crop')
+
+    window.addEventListener('image:edit', onEdit)
+    window.addEventListener('image:crop', onCrop)
+
+    // 全局 dblclick 监听：确保 NodeView 内部的图片也能触发编辑
+    const onDblClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName !== 'IMG') return
+      const src = target.getAttribute('src')
+      if (!src) return
+      e.preventDefault()
+      e.stopPropagation()
+      window.dispatchEvent(new CustomEvent('image:edit', {
+        detail: { src, element: target },
+      }))
+    }
+    document.addEventListener('dblclick', onDblClick, true)
+
+    return () => {
+      window.removeEventListener('image:edit', onEdit)
+      window.removeEventListener('image:crop', onCrop)
+      document.removeEventListener('dblclick', onDblClick, true)
+    }
+  }, [editor])
+
+  // 右键菜单：在编辑器 DOM 上监听 contextmenu
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom as HTMLElement
+
+    const onCtx = (e: MouseEvent): void => {
+      const { empty } = editor.view.state.selection
+      if (empty) return // 无选区不拦截
+
+      e.preventDefault()
+      e.stopPropagation()
+
+      // 提取选区 HTML —— 用 ProseMirror 序列化器，保留自定义节点结构
+      try {
+        setCtxMenuHtml(serializeSelection(editor))
+      } catch {
+        setCtxMenuHtml('')
+      }
+
+      setCtxMenuPos({
+        x: Math.min(e.clientX, window.innerWidth - 170),
+        y: Math.min(e.clientY, window.innerHeight - 50),
+      })
+      setCtxMenuVisible(true)
+    }
+
+    dom.addEventListener('contextmenu', onCtx, true)
+    return () => dom.removeEventListener('contextmenu', onCtx, true)
+  }, [editor])
+
+  // 点击外部关闭右键菜单
+  useEffect(() => {
+    if (!ctxMenuVisible) return
+    const t = setTimeout(() => {
+      const h = (e: MouseEvent) => {
+        if (ctxMenuRef.current?.contains(e.target as Node)) return
+        setCtxMenuVisible(false)
+      }
+      document.addEventListener('mousedown', h)
+      return () => document.removeEventListener('mousedown', h)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [ctxMenuVisible])
+
+  // Run lint on content change (1s debounce)
+  useEffect(() => {
+    if (!editor) return
+
+    const onUpdate = (): void => {
+      if (lintTimerRef.current) clearTimeout(lintTimerRef.current)
+      lintTimerRef.current = setTimeout(() => {
+        if (!editor) return
+        const plainText = editor.getText()
+        const html = editor.getHTML()
+
+        // Stats
+        const newStats = computeStats(html, editor)
+        setStats(newStats)
+
+        // Count base64 images - 直接遍历 ProseMirror 文档节点，比 HTML 字符串匹配更可靠
+        let b64Count = 0
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === 'image' && typeof node.attrs.src === 'string' && node.attrs.src.startsWith('data:image/')) {
+            b64Count++
+          }
+          return true
+        })
+        setBase64Count(b64Count)
+
+        // Skip linting for code blocks and very short text
+        if (plainText.length < 2) {
+          setTypos([])
+          setSensitive([])
+          editor.commands.clearLintIssues()
+          return
+        }
+
+        // Typo check
+        const newTypos = checkTypos(plainText, ignoreList)
+        setTypos(newTypos)
+
+        // Sensitive check (async due to JSON import)
+        checkSensitive(plainText, ignoreList).then((newSensitive) => {
+          setSensitive(newSensitive)
+
+          // Build LintHighlight issues
+          const lintIssues: LintIssue[] = [
+            ...newTypos.map((t) => ({
+              start: t.start,
+              end: t.end,
+              type: 'typo' as const,
+              word: t.word,
+              suggestion: t.suggestion,
+            })),
+            ...newSensitive.map((s) => ({
+              start: s.start,
+              end: s.end,
+              type: `sensitive-${s.level}` as LintIssue['type'],
+              word: s.word,
+              suggestion: s.suggestion || '',
+            })),
+          ]
+          editor.commands.setLintIssues(lintIssues)
+        })
+      }, 1000)
+    }
+
+    editor.on('update', onUpdate)
+    // Initial lint
+    onUpdate()
+
+    return () => {
+      editor.off('update', onUpdate)
+      if (lintTimerRef.current) clearTimeout(lintTimerRef.current)
+    }
+  }, [editor, ignoreList])
+
+  // Listen for upload-retry events from UploadStatus component
+  useEffect(() => {
+    const handleRetry = async (e: Event) => {
+      const { taskId: _taskId, placeholderId } = (e as CustomEvent).detail
+      const file = getStoredFile(placeholderId)
+      if (!file || !editor) return
+
+      try {
+        const uploadConfig = await getUploadConfig()
+        if (!uploadConfig) return
+
+        const arrayBuffer = await file.arrayBuffer()
+        const result = await window.api!.imageUpload(uploadConfig.providerId, { buffer: arrayBuffer, name: file.name }, uploadConfig.config)
+        if (result.success && result.data) {
+          editor.commands.replacePlaceholderImage(placeholderId, result.data.url)
+          deleteStoredFile(placeholderId)
+        }
+      } catch {
+        editor.commands.markImageFailed(placeholderId, '重试失败')
+      }
+    }
+
+    window.addEventListener('upload-retry', handleRetry)
+    return () => window.removeEventListener('upload-retry', handleRetry)
+  }, [editor])
+
+  // Auto-snapshot (throttled)
+  useEffect(() => {
+    if (!editor) return
+    let lastSnapshotTime = 0
+    let lastWordCount = 0
+
+    const update = () => {
+      const articleId = useAppStore.getState().currentArticleId
+      if (!articleId) return
+
+      const content = editor.getHTML()
+      const wordCount = editor.state.doc.textContent.length
+      const now = Date.now() / 1000
+
+      // Check throttling: skip if < 5min and < 100 words changed
+      const timeDiff = now - lastSnapshotTime
+      const wordDiff = Math.abs(wordCount - lastWordCount)
+
+      if (timeDiff < 300 && wordDiff < 100) return
+
+      lastSnapshotTime = now
+      lastWordCount = wordCount
+
+      window.api?.snapshotCreate?.(articleId, content, wordCount)
+    }
+
+    // Check latest snapshot time on mount
+    const articleId = useAppStore.getState().currentArticleId
+    if (articleId) {
+      window.api?.snapshotLatestTime?.(articleId).then((time) => {
+        if (time) lastSnapshotTime = time
+      })
+    }
+
+    editor.on('update', update)
+    return () => { editor.off('update', update) }
+  }, [editor])
+
+  // Link check (manual trigger)
+  const handleLinkRefresh = useCallback(async () => {
+    if (!editor) return
+    setLinkChecking(true)
+    try {
+      const html = editor.getHTML()
+      const urlRegex = /href=["']([^"']+)["']/g
+      const urls: string[] = []
+      let match: RegExpExecArray | null
+      while ((match = urlRegex.exec(html)) !== null) {
+        const url = match[1]
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          urls.push(url)
+        }
+      }
+
+      // Deduplicate
+      const uniqueUrls = [...new Set(urls)]
+      // Limit concurrency to 5
+      const results: LinkCheckResult[] = []
+      const batchSize = 5
+      for (let i = 0; i < uniqueUrls.length; i += batchSize) {
+        const batch = uniqueUrls.slice(i, i + batchSize)
+        const batchResults = await Promise.all(
+          batch.map((url) => window.api.checkLink(url))
+        )
+        results.push(...batchResults)
+      }
+      setLinkResults(results)
+    } catch (err) {
+      console.error('[link-check] Failed:', err)
+    } finally {
+      setLinkChecking(false)
+    }
+  }, [editor])
+
+  // Jump to lint issue position
+  const handleJump = useCallback(
+    (start: number, end: number) => {
+      if (!editor) return
+      const plainText = editor.getText()
+      const word = plainText.slice(start, end)
+      jumpToLintIssue(editor, word, start, end)
+    },
+    [editor]
+  )
+
+  // Ignore a word
+  const handleIgnore = useCallback((word: string) => {
+    setIgnoreList((prev) => new Set([...prev, word]))
+  }, [])
+
+  // Batch upload base64 images
+  const handleUploadBase64Images = useCallback(async () => {
+    if (!editor) return
+    setUploadingBase64(true)
+    try {
+      const uploadConfig = await getUploadConfig()
+      if (!uploadConfig) {
+        return
+      }
+
+      // 收集所有 base64 图片的 src（不存 pos，因为异步上传期间文档可能变化）
+      const base64Srcs: string[] = []
+      const { doc } = editor.state
+      doc.descendants((node) => {
+        if (node.type.name === 'image' && typeof node.attrs.src === 'string' && node.attrs.src.startsWith('data:image/')) {
+          base64Srcs.push(node.attrs.src)
+        }
+        return true
+      })
+
+      if (base64Srcs.length === 0) return
+
+      // 逐个上传，每次上传成功后立即在当前文档中替换
+      for (const oldSrc of base64Srcs) {
+        try {
+          const res = await fetch(oldSrc)
+          const blob = await res.blob()
+          const ext = blob.type.split('/')[1] || 'png'
+          const file = new File([blob], `image-${Date.now()}.${ext}`, { type: blob.type })
+          const buffer = await file.arrayBuffer()
+          const result = await window.api!.imageUpload(uploadConfig.providerId, { buffer, name: file.name }, uploadConfig.config)
+          if (result.success && result.data) {
+            // 在当前最新文档状态中查找并替换
+            const { tr, doc: currentDoc } = editor.state
+            let replaced = false
+            currentDoc.descendants((node, pos) => {
+              if (replaced) return false
+              if (node.type.name === 'image' && node.attrs.src === oldSrc) {
+                tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: result.data?.url })
+                replaced = true
+                return false
+              }
+              return true
+            })
+            if (replaced) {
+              editor.view.dispatch(tr)
+            }
+          }
+        } catch {
+          // Skip failed individual uploads
+        }
+      }
+    } finally {
+      setUploadingBase64(false)
+      // 上传完成后清除 lint 防抖计时器，防止其覆盖正确的 base64Count
+      if (lintTimerRef.current) {
+        clearTimeout(lintTimerRef.current)
+        lintTimerRef.current = null
+      }
+      // 上传完成后立即重新计数，不等 lint debounce
+      if (editor) {
+        let remaining = 0
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === 'image' && typeof node.attrs.src === 'string' && node.attrs.src.startsWith('data:image/')) {
+            remaining++
+          }
+          return true
+        })
+        setBase64Count(remaining)
+      }
+    }
+  }, [editor])
+
+  // Remove all base64 images
+  const handleRemoveBase64Images = useCallback(() => {
+    if (!editor) return
+    const html = editor.getHTML()
+    const newHtml = html.replace(/<img[^>]+src=["']data:image\/[^"']+["'][^>]*\/?>/gi, '')
+    editor.commands.setContent(newHtml)
+  }, [editor])
+
+  const brokenLinks = linkResults.filter((r) => !r.ok).length
+
+  return (
+    <div className="flex h-full flex-col">
+      <Toolbar editor={editor} />
+      <FindReplacePanel
+        open={findReplaceOpen}
+        replaceMode={findReplaceMode}
+        onClose={() => {
+          setFindReplaceOpen(false)
+          editor?.commands.clearFind()
+        }}
+        editor={editor}
+      />
+      {/* Base64 images warning bar */}
+      {base64Count > 0 && (
+        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
+          <span>⚠ 此文档包含 {base64Count} 张未上传图片</span>
+          <button
+            type="button"
+            className="rounded bg-amber-600 px-2 py-0.5 text-white hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
+            onClick={handleUploadBase64Images}
+            disabled={uploadingBase64}
+          >
+            {uploadingBase64 ? '上传中…' : '上传到图床'}
+          </button>
+          <button
+            type="button"
+            className="text-amber-600 hover:text-amber-800 cursor-pointer"
+            onClick={handleRemoveBase64Images}
+          >
+            全部移除
+          </button>
+        </div>
+      )}
+      <TipTapEditorContent editor={editor} className="editor-wrapper" />
+      {editor && (
+        // @ts-expect-error DragHandle props type mismatch
+        <DragHandle editor={editor} tippyOptions={{ duration: 150 }}>
+          <BlockMenu editor={editor} />
+        </DragHandle>
+      )}
+      {editor && (
+        <BubbleMenu
+          editor={editor}
+          appendTo={() => document.body}
+          shouldShow={({ editor }) => editor.isActive('table')}
+          className="z-50"
+        >
+          <TableBubbleMenuContent editor={editor} />
+        </BubbleMenu>
+      )}
+
+      {/* AI 气泡菜单：选中 ≥5 字文字时出现 */}
+      {editor && (
+        <BubbleMenu
+          editor={editor}
+          appendTo={() => document.body}
+          shouldShow={({ editor }) => {
+            const { empty } = editor.state.selection
+            if (empty) return false
+            const text = editor.state.doc.textBetween(
+              editor.state.selection.from,
+              editor.state.selection.to,
+              ''
+            )
+            return text.length >= 5 && !editor.isActive('table')
+          }}
+          className="z-50"
+        >
+          <AIActionButton editor={editor} />
+        </BubbleMenu>
+      )}
+
+      {/* AI 输出面板（固定在底部） */}
+      {editor && <AIOutputPanel editor={editor} />}
+
+      {editor && (
+        <div className="flex justify-center py-1">
+          <ColumnsToolbar editor={editor} />
+        </div>
+      )}
+      <StatusBar
+        stats={stats}
+        typos={typos}
+        sensitive={sensitive as any}
+        onJump={handleJump}
+        onIgnoreTypo={handleIgnore}
+        onIgnoreSensitive={handleIgnore}
+        onLinkRefresh={handleLinkRefresh}
+        linkBrokenCount={brokenLinks}
+        linkChecking={linkChecking}
+        linkResults={linkResults}
+      />
+      <UploadStatus />
+
+      {/* 右键菜单 */}
+      {ctxMenuVisible && (
+        <div
+          ref={ctxMenuRef}
+          className="fixed z-[9999] bg-popover border border-border rounded-md shadow-lg py-1 min-w-[150px]"
+          style={{ left: ctxMenuPos.x, top: ctxMenuPos.y }}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent flex items-center gap-2 cursor-pointer"
+            onClick={() => {
+              setCtxMenuVisible(false)
+              setSaveDialogHtml(ctxMenuHtml)
+              setSaveDialogOpen(true)
+            }}
+          >
+            <span>📌</span>
+            <span>保存为素材</span>
+          </button>
+        </div>
+      )}
+
+      {/* 保存素材对话框 */}
+      <SaveMaterialDialog
+        open={saveDialogOpen}
+        onClose={() => setSaveDialogOpen(false)}
+        selectedHtml={saveDialogHtml}
+      />
+
+      {/* 图片编辑器 */}
+      <ImageEditorModal
+        open={imageEditorOpen}
+        onClose={() => setImageEditorOpen(false)}
+        imageUrl={imageEditorSrc}
+        imagePos={imageEditorPos}
+        initialTool={imageEditorInitialTool}
+      />
+    </div>
+  )
+}
+
+export { Editor }
