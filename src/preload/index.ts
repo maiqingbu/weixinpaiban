@@ -221,6 +221,24 @@ const api = {
     ipcRenderer.invoke('image-search:get-pexels-key'),
   imageSearchDeletePexelsKey: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('image-search:delete-pexels-key'),
+  // Image Generation
+  imageGenListConfigured: (): Promise<Array<{ provider_id: string; model_id: string }>> =>
+    ipcRenderer.invoke('image-gen:list-configured'),
+  imageGenSaveKey: (providerId: string, apiKey: string, modelId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('image-gen:save-key', providerId, apiKey, modelId),
+  imageGenGetKey: (providerId: string): Promise<{ api_key: string; model_id: string } | null> =>
+    ipcRenderer.invoke('image-gen:get-key', providerId),
+  imageGenDeleteKey: (providerId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('image-gen:delete-key', providerId),
+  imageGenGenerate: (providerId: string, apiBase: string, modelId: string, prompt: string): Promise<string[]> =>
+    ipcRenderer.invoke('image-gen:generate', providerId, apiBase, modelId, prompt),
+  // Custom Image Gen Providers
+  imageGenCustomList: (): Promise<Array<{ id: string; name: string; api_base: string; default_model: string; models_json: string; docs_url: string; description: string }>> =>
+    ipcRenderer.invoke('image-gen:custom-list'),
+  imageGenCustomSave: (provider: { id?: string; name: string; apiBase: string; defaultModel: string; models: Array<{ id: string; name: string }>; docsUrl?: string; description?: string }): Promise<{ id: string }> =>
+    ipcRenderer.invoke('image-gen:custom-save', provider),
+  imageGenCustomDelete: (providerId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('image-gen:custom-delete', providerId),
   // Tavily Search
   tavilySetKey: (apiKey: string): Promise<void> =>
     ipcRenderer.invoke('tavily:set-key', apiKey),

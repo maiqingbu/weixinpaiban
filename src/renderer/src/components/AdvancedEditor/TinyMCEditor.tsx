@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from 'react'
+import { useRef, useCallback, useState } from 'react'
 import { Editor } from '@tinymce/tinymce-react'
 import 'tinymce/tinymce'
 import 'tinymce/themes/silver'
@@ -24,48 +24,47 @@ import 'tinymce/plugins/directionality'
 import 'tinymce/plugins/emoticons/js/emojis'
 import type { AdvancedEditorProps } from './types'
 
-// TinyMCE 皮肤需要从 node_modules 复制
-// 运行: cp -r node_modules/tinymce/skins ../public/tinymce/skins
-
 function TinyMCEditor({ initialContent, onChange }: AdvancedEditorProps): React.JSX.Element {
   const editorRef = useRef<any>(null)
   const [showHint, setShowHint] = useState(true)
-  const isReadyRef = useRef(false)
-  const pendingContentRef = useRef<string | null>(null)
+
+  // 调试：在组件内显示 undo 状态
+  const [undoState, setUndoState] = useState('init')
 
   const handleInit = useCallback((_evt: any, editor: any) => {
     editorRef.current = editor
-    isReadyRef.current = true
-    console.log('[TinyMCEditor] Editor initialized')
-
-    // 如果有待设置的内容，在初始化后设置
-    if (pendingContentRef.current !== null) {
-      editor.setContent(pendingContentRef.current)
-      pendingContentRef.current = null
-    } else if (initialContent) {
-      editor.setContent(initialContent)
+    const logState = (label: string) => {
+      const hasU = editor.undoManager.hasUndo()
+      const hasR = editor.undoManager.hasRedo()
+      const len = editor.undoManager.data?.length ?? '?'
+      setUndoState(`${label}: undo=${hasU} redo=${hasR} levels=${len}`)
+      console.log(`[TinyMCE] ${label}: hasUndo=${hasU}, hasRedo=${hasR}, levels=${len}`)
     }
-  }, [initialContent])
+    logState('init')
+
+    let changeCount = 0
+    editor.on('change AddUndo undo redo', () => {
+      changeCount++
+      logState(`event#${changeCount}(${editor.isDirty() ? 'dirty' : 'clean'})`)
+    })
+  }, [])
 
   const handleEditorChange = useCallback((content: string) => {
     onChange?.(content)
   }, [onChange])
 
-  // 当 initialContent 变化时更新编辑器内容
-  useEffect(() => {
-    const editor = editorRef.current
-    if (editor && isReadyRef.current) {
-      // 编辑器已初始化，直接设置内容
-      editor.setContent(initialContent || '')
-    } else if (initialContent) {
-      // 编辑器还没初始化完成，先暂存内容
-      pendingContentRef.current = initialContent
-    }
-  }, [initialContent])
-
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* 图片编辑提示 */}
+      {/* 调试面板 */}
+      <div style={{
+        position: 'absolute', bottom: 8, right: 8, zIndex: 1001,
+        background: 'rgba(0,0,0,0.8)', color: '#0f0', padding: '4px 8px',
+        borderRadius: 4, fontSize: 10, fontFamily: 'monospace', maxWidth: '90%',
+        wordBreak: 'break-all'
+      }}>
+        {undoState}
+      </div>
+
       {showHint && (
         <div
           style={{
@@ -153,9 +152,7 @@ function TinyMCEditor({ initialContent, onChange }: AdvancedEditorProps): React.
             })
           },
           setup: (editor: any) => {
-            // 自定义样式格式
             editor.on('init', () => {
-              // 添加一些常用的样式格式
               editor.formatter.register('customformat', {
                 inline: 'span',
                 styles: {

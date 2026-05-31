@@ -58,7 +58,7 @@ function EditorPane(): React.JSX.Element {
       <div className="flex items-center gap-2 px-3 py-1 border-b border-border bg-muted/30 shrink-0">
         <button
           onClick={handleOpenAdvanced}
-          className="px-3 py-1 rounded text-xs font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90"
+          className="px-3 py-1 rounded text-xs font-medium transition-all duration-200 bg-gradient-to-r from-violet-500 to-indigo-500 text-white shadow-sm shadow-indigo-500/25 hover:from-violet-600 hover:to-indigo-600 hover:shadow-indigo-500/40"
         >
           高级编辑器
         </button>

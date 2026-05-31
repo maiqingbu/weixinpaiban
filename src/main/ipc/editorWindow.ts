@@ -37,9 +37,12 @@ export function registerEditorWindowHandlers(): void {
       autoHideMenuBar: true,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
-        sandbox: false
+        sandbox: true
       }
     })
+
+    // 移除默认菜单，让 Cmd+Z / Cmd+Y 等快捷键直达 TinyMCE
+    editorWindow.setMenu(null)
 
     editorWindow.on('closed', () => {
       editorWindow = null
@@ -50,6 +53,10 @@ export function registerEditorWindowHandlers(): void {
       editorWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/editor.html`)
     } else {
       editorWindow.loadFile(join(__dirname, '../renderer/editor.html'))
+    }
+
+    if (is.dev) {
+      editorWindow.webContents.openDevTools({ mode: 'bottom' })
     }
   })
 

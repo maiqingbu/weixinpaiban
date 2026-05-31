@@ -324,7 +324,7 @@ function PreviewPane(): React.JSX.Element {
         /* Preview area — scaled rendering */
         <div
           ref={containerRef}
-          className="min-h-0 flex-1 overflow-auto p-4"
+          className="min-h-0 flex-1 overflow-y-scroll p-4"
         >
           <div
             style={{

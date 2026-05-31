@@ -129,6 +129,16 @@ interface Api {
   imageSearchSetPexelsKey: (apiKey: string) => Promise<{ success: boolean }>
   imageSearchGetPexelsKey: () => Promise<{ apiKey: string | null }>
   imageSearchDeletePexelsKey: () => Promise<{ success: boolean }>
+  // Image Generation
+  imageGenListConfigured: () => Promise<Array<{ provider_id: string; model_id: string }>>
+  imageGenSaveKey: (providerId: string, apiKey: string, modelId: string) => Promise<{ success: boolean }>
+  imageGenGetKey: (providerId: string) => Promise<{ api_key: string; model_id: string } | null>
+  imageGenDeleteKey: (providerId: string) => Promise<{ success: boolean }>
+  imageGenGenerate: (providerId: string, apiBase: string, modelId: string, prompt: string) => Promise<string[]>
+  // Custom Image Gen Providers
+  imageGenCustomList: () => Promise<Array<{ id: string; name: string; api_base: string; default_model: string; models_json: string; docs_url: string; description: string }>>
+  imageGenCustomSave: (provider: { id?: string; name: string; apiBase: string; defaultModel: string; models: Array<{ id: string; name: string }>; docsUrl?: string; description?: string }) => Promise<{ id: string }>
+  imageGenCustomDelete: (providerId: string) => Promise<{ success: boolean }>
   // Tavily Search
   tavilySetKey: (apiKey: string) => Promise<void>
   tavilyGetKey: () => Promise<string | null>

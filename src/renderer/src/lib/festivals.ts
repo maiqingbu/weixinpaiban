@@ -1,4 +1,5 @@
 import type { FestivalMeta } from './materials/types'
+import solarlunar from 'solarlunar'
 
 /**
  * 获取即将到来的节日（30天内）
@@ -7,14 +8,6 @@ import type { FestivalMeta } from './materials/types'
 export function getUpcomingFestivals(festivals: FestivalMeta[]): Array<FestivalMeta & { date: Date; daysLeft: number }> {
   const now = new Date()
   const results: Array<FestivalMeta & { date: Date; daysLeft: number }> = []
-
-  // 延迟加载 solarlunar
-  let solarlunar: any = null
-  try {
-    solarlunar = require('solarlunar').default
-  } catch {
-    // solarlunar 不可用时，只处理公历节日
-  }
 
   for (const f of festivals) {
     let festivalDate: Date | null = null

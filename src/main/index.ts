@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
+import { rm } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc'
@@ -11,6 +12,7 @@ import { registerAiHandlers } from './ipc/ai'
 import { registerImageUploadHandlers } from './ipc/imageUpload'
 import { registerCustomMaterialHandlers } from './ipc/customMaterial'
 import { registerImageSearchHandlers } from './ipc/imageSearch'
+import { registerImageGenHandlers } from './ipc/imageGen'
 import { registerEditorWindowHandlers } from './ipc/editorWindow'
 import { registerTavilyHandlers } from './ipc/tavily'
 import { startPreviewServer } from './services/previewServer'
@@ -27,7 +29,7 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: true
     }
   })
 
@@ -62,6 +64,9 @@ function createWindow(): void {
   }
 }
 
+if (is.dev) {
+    app.commandLine.appendSwitch('remote-debugging-port', '9222')
+  }
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
 
@@ -81,6 +86,9 @@ app.whenReady().then(() => {
     }
   })
 
+  // Clean up temp files from previous runs
+  rm(join(app.getPath('userData'), 'temp'), { recursive: true, force: true }).catch(() => {})
+
   // Initialize database
   getDb()
 
@@ -97,6 +105,7 @@ app.whenReady().then(() => {
   registerImageUploadHandlers(getDb())
   registerCustomMaterialHandlers()
   registerImageSearchHandlers()
+  registerImageGenHandlers()
   registerEditorWindowHandlers()
   registerTavilyHandlers()
 

@@ -1,17 +1,19 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { TinyMCEditor } from './components/AdvancedEditor/TinyMCEditor'
 
 function EditorWindow(): React.JSX.Element {
-  const [content, setContent] = useState('')
+  // 仅保存外部（主窗口）推送的内容，用于初始化/更新编辑器
+  const [externalContent, setExternalContent] = useState('')
+  // 编辑器当前内容存 ref，避免回流触发 TinyMCE React 内部 setContent
+  const contentRef = useRef('')
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    // 监听主窗口发来的初始内容
     const handler = (_event: any, html: string) => {
-      setContent(html)
+      contentRef.current = html
+      setExternalContent(html)
     }
     window.api.editorOnSetContent(handler)
-    // 通知主进程编辑器已就绪，可以接收内容
     window.api.editorReady()
     return () => {
       window.api.editorOffSetContent(handler)
@@ -19,14 +21,14 @@ function EditorWindow(): React.JSX.Element {
   }, [])
 
   const handleChange = useCallback((html: string) => {
-    setContent(html)
+    contentRef.current = html
   }, [])
 
   const handleSave = useCallback(() => {
-    window.api.editorSave(content)
+    window.api.editorSave(contentRef.current)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }, [content])
+  }, [])
 
   const handleClose = useCallback(() => {
     window.api.editorClose()
@@ -63,7 +65,7 @@ function EditorWindow(): React.JSX.Element {
       {/* 编辑器 */}
       <div className="flex-1 min-h-0">
         <TinyMCEditor
-          initialContent={content}
+          initialContent={externalContent}
           onChange={handleChange}
         />
       </div>

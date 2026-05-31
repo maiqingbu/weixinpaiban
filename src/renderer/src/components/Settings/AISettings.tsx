@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { ExternalLink, Loader2, Check, Trash2, Plus, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { PROVIDERS } from '@/lib/ai'
 import type { AIProvider } from '@/lib/ai'
 import { useToast } from '@/hooks/use-toast'
@@ -42,6 +43,8 @@ function AISettings(): React.JSX.Element {
   const [formModels, setFormModels] = useState('')
   const [formDocsUrl, setFormDocsUrl] = useState('')
   const [formDescription, setFormDescription] = useState('')
+
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
 
   const { toast } = useToast()
 
@@ -140,30 +143,39 @@ function AISettings(): React.JSX.Element {
     window.dispatchEvent(new Event('ai-config-changed'))
   }
 
-  const handleSaveCustom = async () => {
+  const parsedModels = (() => {
+    return formModels.split('\n').filter(Boolean).map((line) => {
+      const [id, name] = line.split('|').map((s) => s.trim())
+      return { id: id || '', name: name || id || '' }
+    }).filter((m) => m.id)
+  })()
+
+  const handleSaveCustom = () => {
     if (!formName.trim() || !formApiBase.trim()) {
       toast({ title: '请填写名称和 API 地址', variant: 'destructive' })
       return
     }
-    const models = formModels.split('\n').filter(Boolean).map((line) => {
-      const [id, name] = line.split('|').map((s) => s.trim())
-      return { id: id || '', name: name || id || '' }
-    }).filter((m) => m.id)
-    if (models.length === 0) {
+    if (parsedModels.length === 0) {
       toast({ title: '请至少添加一个模型', variant: 'destructive' })
       return
     }
+    setShowAddCustom(false)
+    setShowConfirmDialog(true)
+  }
+
+  const handleConfirmSave = async () => {
     try {
       await window.api.aiCustomSave({
         id: editingCustom?.id,
         name: formName.trim(),
         apiBase: formApiBase.trim().replace(/\/+$/, ''),
-        defaultModel: formDefaultModel.trim() || models[0].id,
-        models,
+        defaultModel: formDefaultModel.trim() || parsedModels[0].id,
+        models: parsedModels,
         docsUrl: formDocsUrl.trim(),
         description: formDescription.trim(),
       })
       toast({ title: editingCustom ? '已更新' : '已添加' })
+      setShowConfirmDialog(false)
       resetCustomForm()
       await loadCustomProviders()
       await loadStates()
@@ -469,51 +481,121 @@ function AISettings(): React.JSX.Element {
         </div>
       )}
 
-      {/* Add/Edit Custom Provider Form */}
-      {showAddCustom && (
-        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
-          <h3 className="text-sm font-medium">{editingCustom ? '编辑服务商' : '添加自定义服务商'}</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">名称 *</label>
-              <Input className="h-8 text-sm" placeholder="如：我的 API" value={formName} onChange={(e) => setFormName(e.target.value)} />
+      {/* 第一步弹窗：填写服务商信息 */}
+      <Dialog open={showAddCustom} onOpenChange={(open) => { if (!open) resetCustomForm() }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingCustom ? '编辑服务商' : '添加自定义服务商'}</DialogTitle>
+            <DialogDescription>
+              填写 API 地址和模型信息
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">名称 *</label>
+                <Input className="h-8 text-sm" placeholder="如：我的 API" value={formName} onChange={(e) => setFormName(e.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">API 地址 *</label>
+                <Input className="h-8 text-sm" placeholder="https://api.example.com/v1" value={formApiBase} onChange={(e) => setFormApiBase(e.target.value)} />
+              </div>
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">API 地址 *</label>
-              <Input className="h-8 text-sm" placeholder="https://api.example.com/v1" value={formApiBase} onChange={(e) => setFormApiBase(e.target.value)} />
+              <label className="mb-1 block text-xs text-muted-foreground">模型列表（每行一个，格式：模型ID|显示名称）*</label>
+              <textarea
+                className="w-full h-20 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"
+                placeholder={"gpt-4o|GPT-4o\ngpt-4o-mini|GPT-4o Mini"}
+                value={formModels}
+                onChange={(e) => setFormModels(e.target.value)}
+              />
             </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">模型列表（每行一个，格式：模型ID|显示名称）*</label>
-            <textarea
-              className="w-full h-20 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"
-              placeholder={"gpt-4o|GPT-4o\ngpt-4o-mini|GPT-4o Mini"}
-              value={formModels}
-              onChange={(e) => setFormModels(e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">默认模型 ID</label>
+                <Input className="h-8 text-sm" placeholder="留空取第一个" value={formDefaultModel} onChange={(e) => setFormDefaultModel(e.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">文档链接</label>
+                <Input className="h-8 text-sm" placeholder="https://..." value={formDocsUrl} onChange={(e) => setFormDocsUrl(e.target.value)} />
+              </div>
+            </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">默认模型 ID</label>
-              <Input className="h-8 text-sm" placeholder="留空取第一个" value={formDefaultModel} onChange={(e) => setFormDefaultModel(e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">文档链接</label>
-              <Input className="h-8 text-sm" placeholder="https://..." value={formDocsUrl} onChange={(e) => setFormDocsUrl(e.target.value)} />
+              <label className="mb-1 block text-xs text-muted-foreground">说明</label>
+              <Input className="h-8 text-sm" placeholder="简要描述此服务商" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
             </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">说明</label>
-            <Input className="h-8 text-sm" placeholder="简要描述此服务商" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={resetCustomForm}>取消</Button>
-            <Button size="sm" className="h-7 text-xs" onClick={handleSaveCustom}>
-              {editingCustom ? '更新' : '添加'}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={resetCustomForm}>取消</Button>
+            <Button size="sm" onClick={handleSaveCustom}>
+              下一步
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 第二步弹窗：确认信息 */}
+      <Dialog open={showConfirmDialog} onOpenChange={(open) => { if (!open) { setShowConfirmDialog(false); setShowAddCustom(true) } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingCustom ? '确认更新服务商' : '确认添加服务商'}</DialogTitle>
+            <DialogDescription>
+              请确认以下信息无误后再提交
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-[5em_1fr] gap-x-3 gap-y-2 text-sm">
+              <span className="text-muted-foreground">名称</span>
+              <span className="font-medium">{formName}</span>
+
+              <span className="text-muted-foreground">API 地址</span>
+              <span className="font-mono text-xs break-all">{formApiBase.trim().replace(/\/+$/, '')}</span>
+
+              <span className="text-muted-foreground">默认模型</span>
+              <span className="font-mono text-xs">{formDefaultModel.trim() || parsedModels[0]?.id || '-'}</span>
+
+              <span className="text-muted-foreground">模型数量</span>
+              <span>{parsedModels.length} 个</span>
+            </div>
+
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                查看模型列表
+              </summary>
+              <div className="mt-2 max-h-32 overflow-y-auto rounded border bg-muted/30 p-2">
+                {parsedModels.map((m) => (
+                  <div key={m.id} className="flex gap-2 py-0.5">
+                    <span className="font-mono text-muted-foreground">{m.id}</span>
+                    <span>{m.name}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            {formDocsUrl.trim() && (
+              <div className="grid grid-cols-[5em_1fr] gap-x-3 text-sm">
+                <span className="text-muted-foreground">文档链接</span>
+                <span className="font-mono text-xs break-all">{formDocsUrl.trim()}</span>
+              </div>
+            )}
+
+            {formDescription.trim() && (
+              <div className="grid grid-cols-[5em_1fr] gap-x-3 text-sm">
+                <span className="text-muted-foreground">说明</span>
+                <span>{formDescription.trim()}</span>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setShowConfirmDialog(false); setShowAddCustom(true) }}>
+              返回修改
+            </Button>
+            <Button size="sm" onClick={handleConfirmSave}>
+              确认{editingCustom ? '更新' : '添加'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

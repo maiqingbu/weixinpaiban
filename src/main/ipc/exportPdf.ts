@@ -1,6 +1,7 @@
 import { ipcMain, dialog, BrowserWindow, shell, app } from 'electron'
 import { writeFile, unlink, mkdir } from 'fs/promises'
 import { join } from 'path'
+import { is } from '@electron-toolkit/utils'
 
 export function registerExportPdfHandlers(): void {
   ipcMain.handle('export-pdf', async (_event, html: string, title: string, options: { pageSize: string | { width: number; height: number } }) => {
@@ -123,10 +124,12 @@ export function registerExportPdfHandlers(): void {
       const image = await win.webContents.capturePage()
       const pngBuffer = image.toPNG()
 
-      // Debug: save captured PNG and keep temp HTML
-      const debugPngPath = join(app.getPath('userData'), 'capture-output.png')
-      await writeFile(debugPngPath, pngBuffer)
-      console.log('[capture-long-image] Saved debug PNG to:', debugPngPath, 'size:', pngBuffer.length)
+      // Debug: save captured PNG in dev mode
+      if (is.dev) {
+        const debugPngPath = join(app.getPath('userData'), 'capture-output.png')
+        await writeFile(debugPngPath, pngBuffer)
+        console.log('[capture-long-image] Saved debug PNG to:', debugPngPath, 'size:', pngBuffer.length)
+      }
 
       const safeTitle = (title || '未命名文章').replace(/[\\/:*?"<>|]/g, '_')
 

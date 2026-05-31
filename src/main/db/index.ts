@@ -172,6 +172,67 @@ export function getDb(): Database.Database {
   // ── Migrations for v0.8.0 (独立高级编辑器内容) ──
   try { db.exec('ALTER TABLE articles ADD COLUMN advanced_content TEXT DEFAULT \'\'') } catch {}
 
+  // ── Image Generation API Keys ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS image_gen_keys (
+      provider_id TEXT PRIMARY KEY,
+      api_key BLOB NOT NULL,
+      model_id TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )
+  `)
+
+  // Migration: encrypt existing plain-text image_gen_keys
+  try {
+    const database = db
+    const cols = database.prepare("PRAGMA table_info('image_gen_keys')").all() as Array<{ name: string; type: string }>
+    const apiKeyCol = cols.find((c) => c.name === 'api_key')
+    if (apiKeyCol && apiKeyCol.type.toUpperCase() === 'TEXT') {
+      const { safeStorage } = require('electron')
+      if (safeStorage.isEncryptionAvailable()) {
+        const rows = database.prepare('SELECT provider_id, api_key FROM image_gen_keys').all() as Array<{ provider_id: string; api_key: string }>
+        const encrypt = database.transaction(() => {
+          database.exec(`
+            CREATE TABLE IF NOT EXISTS image_gen_keys_new (
+              provider_id TEXT PRIMARY KEY,
+              api_key BLOB NOT NULL,
+              model_id TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+              updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )
+          `)
+          for (const row of rows) {
+            try {
+              const encrypted = safeStorage.encryptString(row.api_key)
+              database.prepare('INSERT INTO image_gen_keys_new (provider_id, api_key, model_id, created_at, updated_at) SELECT provider_id, ?, model_id, created_at, updated_at FROM image_gen_keys WHERE provider_id = ?')
+                .run(encrypted, row.provider_id)
+            } catch {
+              // safeStorage unavailable for this key, skip
+            }
+          }
+          database.exec('DROP TABLE image_gen_keys')
+          database.exec('ALTER TABLE image_gen_keys_new RENAME TO image_gen_keys')
+        })
+        encrypt()
+      }
+    }
+  } catch { /* table may not exist yet, or already migrated */ }
+
+  // ── Custom Image Generation Providers ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS custom_image_gen_providers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      api_base TEXT NOT NULL,
+      default_model TEXT NOT NULL DEFAULT '',
+      models_json TEXT NOT NULL DEFAULT '[]',
+      docs_url TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )
+  `)
+
   return db
 }
 
