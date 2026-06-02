@@ -163,6 +163,21 @@ export const MIGRATIONS: Migration[] = [
     up: (db) => {
       addColumnIfNotExists(db, 'articles', 'advanced_content', "TEXT DEFAULT ''")
     }
+  },
+  {
+    id: 5,
+    name: 'add_encrypted_secrets',
+    up: (db) => {
+      // 用于 safeStorage 加密存储敏感凭据（API key 等）
+      // 与 image_host_settings (明文) 区分，避免混淆
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS encrypted_secrets (
+          key TEXT PRIMARY KEY,
+          encrypted_value BLOB NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `)
+    }
   }
 ]
 

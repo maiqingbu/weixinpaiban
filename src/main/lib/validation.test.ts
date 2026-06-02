@@ -7,6 +7,7 @@ import {
   validateId,
   validateObject,
   validateEnum,
+  validateHexId,
   safeValidate,
   ValidationError
 } from './validation'
@@ -141,5 +142,28 @@ describe('safeValidate', () => {
       throw new Error('unexpected')
     }, 'fallback')
     expect(result).toBe('fallback')
+  })
+})
+
+describe('validateHexId', () => {
+  it('accepts valid hex strings', () => {
+    expect(validateHexId('abcdef0123456789', 'id')).toBe('abcdef0123456789')
+    expect(validateHexId('12345678', 'id')).toBe('12345678')
+  })
+
+  it('rejects non-hex characters', () => {
+    expect(() => validateHexId('xyz12345', 'id')).toThrow(ValidationError)
+    expect(() => validateHexId('abc-def', 'id')).toThrow(ValidationError)
+    expect(() => validateHexId('<script>', 'id')).toThrow(ValidationError)
+  })
+
+  it('rejects too short / too long strings', () => {
+    expect(() => validateHexId('ab', 'id')).toThrow(ValidationError)
+    expect(() => validateHexId('a'.repeat(40), 'id')).toThrow(ValidationError)
+  })
+
+  it('rejects non-strings', () => {
+    expect(() => validateHexId(123, 'id')).toThrow(ValidationError)
+    expect(() => validateHexId(null, 'id')).toThrow(ValidationError)
   })
 })

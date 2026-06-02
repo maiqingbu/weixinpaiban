@@ -13,7 +13,6 @@ import {
 function EditorPane(): React.JSX.Element {
   const editor = useEditor()
   const editorContent = useAppStore((s) => s.editorContent)
-  const advancedEditorContent = useAppStore((s) => s.advancedEditorContent)
   const currentArticleId = useAppStore((s) => s.currentArticleId)
   const articles = useAppStore((s) => s.articles)
   const setEditorContent = useAppStore((s) => s.setEditorContent)

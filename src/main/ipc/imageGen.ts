@@ -5,11 +5,16 @@ import {
   validateObject,
   validateArray
 } from '../lib/validation'
+import { isSafeExternalUrl } from '../lib/urlSafety'
 
 async function generateViaOpenAI(
   apiBase: string, apiKey: string, model: string, prompt: string,
   bodyOverrides?: Record<string, unknown>,
 ): Promise<string[]> {
+  // SSRF 防护：custom provider 的 apiBase 必须指向外网
+  if (!isSafeExternalUrl(apiBase)) {
+    throw new Error('apiBase 必须为指向公网的可信 URL，不能指向内网/本地')
+  }
   const url = `${apiBase.replace(/\/+$/, '')}/images/generations`
   const defaultBody: Record<string, unknown> = {
     model,
@@ -41,9 +46,23 @@ async function generateViaOpenAI(
     if (item.b64_json) {
       images.push(`data:image/png;base64,${item.b64_json}`)
     } else if (item.url) {
+      // SSRF 防护：API 返回的图片 URL 也必须指向公网
+      const itemUrl = String(item.url)
+      if (!isSafeExternalUrl(itemUrl)) {
+        console.error('[imageGen] 跳过内网/本地图片 URL:', itemUrl.slice(0, 80))
+        continue
+      }
       try {
-        console.log('[imageGen] downloading image from URL:', (item.url as string).slice(0, 80))
-        const imgResp = await fetch(item.url, { signal: AbortSignal.timeout(30000) })
+        console.log('[imageGen] downloading image from URL:', itemUrl.slice(0, 80))
+        const imgResp = await fetch(itemUrl, {
+          signal: AbortSignal.timeout(30000),
+          // 拒绝跟随 302 重定向
+          redirect: 'manual',
+        })
+        if (imgResp.status >= 300 && imgResp.status < 400) {
+          console.error('[imageGen] image redirect rejected')
+          continue
+        }
         if (imgResp.ok) {
           const buffer = await imgResp.arrayBuffer()
           const base64 = Buffer.from(buffer).toString('base64')

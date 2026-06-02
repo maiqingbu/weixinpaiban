@@ -157,9 +157,9 @@ interface Api {
   imageGenCustomSave: (provider: { id?: string; name: string; apiBase: string; defaultModel: string; models: Array<{ id: string; name: string }>; docsUrl?: string; description?: string }) => Promise<{ id: string }>
   imageGenCustomDelete: (providerId: string) => Promise<{ success: boolean }>
   // Tavily Search
-  tavilySetKey: (apiKey: string) => Promise<void>
-  tavilyGetKey: () => Promise<string | null>
-  tavilyDeleteKey: () => Promise<void>
+  tavilySetKey: (apiKey: string) => Promise<{ success: boolean }>
+  tavilyGetKey: () => Promise<{ apiKey: string | null; configured: boolean }>
+  tavilyDeleteKey: () => Promise<{ success: boolean }>
   tavilySearch: (query: string, maxResults?: number) => Promise<{ results: Array<{ title: string; url: string; content: string; score: number }>; error?: string }>
   // Editor Window
   editorOpen: (content: string) => Promise<void>
@@ -171,6 +171,8 @@ interface Api {
   editorOffSetContent: (callback: (...args: any[]) => void) => void
   editorOnSaved: (callback: (event: Electron.IpcRendererEvent, html: string) => void) => void
   editorOffSaved: (callback: (...args: any[]) => void) => void
+  editorOnClosed: (callback: () => void) => void
+  editorOffClosed: (callback: () => void) => void
 }
 
 declare global {

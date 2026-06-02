@@ -78,6 +78,19 @@ export function validateId(value: unknown, fieldName: string = 'id'): number {
   return validateNumber(value, fieldName, { min: 1, integer: true })
 }
 
+/**
+ * 校验 16 进制短 id（preview server 用）
+ * - 必须由 a-f0-9 组成
+ * - 长度 8-32
+ */
+export function validateHexId(value: unknown, fieldName: string = 'id'): string {
+  const str = validateString(value, fieldName, { minLength: 8, maxLength: 32 })
+  if (!/^[a-f0-9]+$/i.test(str)) {
+    throw new ValidationError(`${fieldName} must be a hex string`, fieldName)
+  }
+  return str
+}
+
 export function validateUrl(value: unknown, fieldName: string): string {
   const str = validateString(value, fieldName)
   try {

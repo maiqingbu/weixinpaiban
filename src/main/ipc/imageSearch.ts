@@ -1,6 +1,7 @@
 import { ipcMain, shell, BrowserWindow } from 'electron'
 import { getDb } from '../db'
 import { validateString, validateNumber, validateUrl } from '../lib/validation'
+import { isSafeExternalUrl } from '../lib/urlSafety'
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -33,11 +34,16 @@ async function searchPexels(query: string, count: number, page: number): Promise
     for (const photo of data.photos || []) {
       const url = photo.src?.large || photo.src?.medium || photo.src?.original || ''
       if (!url) continue
+      // SSRF 防护：校验图片 URL 不能指向内网/本地
+      if (!isSafeExternalUrl(url)) continue
       try {
+        // redirect: 'manual' 拒绝自动跟随 302，防止被重定向到内网
         const imgResp = await fetch(url, {
           headers: { 'User-Agent': UA },
           signal: AbortSignal.timeout(12000),
+          redirect: 'manual',
         })
+        if (imgResp.status >= 300 && imgResp.status < 400) continue
         if (!imgResp.ok) continue
         const buffer = await imgResp.arrayBuffer()
         if (buffer.byteLength < 8000) continue
@@ -112,16 +118,22 @@ function searchImagesViaBrowser(
         // Deduplicate URLs from this source
         const uniqueUrls = [...new Set(imgUrls)].slice(0, count * 3)
 
+        // SSRF 防护：过滤掉内网/本地 URL
+        const safeUrls = uniqueUrls.filter((u) => isSafeExternalUrl(u))
+
         // Download images via main process
         const images: string[] = []
         const downloadedUrls: string[] = []
-        for (const imgUrl of uniqueUrls) {
+        for (const imgUrl of safeUrls) {
           if (images.length >= count) break
           try {
             const resp = await fetch(imgUrl, {
               headers: { 'User-Agent': UA, Referer: referer },
               signal: AbortSignal.timeout(10000),
+              // 拒绝自动跟随 302，防止被重定向到内网
+              redirect: 'manual',
             })
+            if (resp.status >= 300 && resp.status < 400) continue
             if (!resp.ok) continue
             const buffer = await resp.arrayBuffer()
             if (buffer.byteLength < 6000) continue
@@ -310,11 +322,20 @@ export function registerImageSearchHandlers(): void {
 
   ipcMain.handle('image-search:download', async (_event, imageUrl: unknown) => {
     const safeUrl = validateUrl(imageUrl, 'imageUrl')
+    // SSRF 防护：拒绝内网/本地 URL
+    if (!isSafeExternalUrl(safeUrl)) {
+      return { error: '不允许访问内网或本地地址' }
+    }
     try {
       const resp = await fetch(safeUrl, {
         headers: { 'User-Agent': UA },
         signal: AbortSignal.timeout(30000),
+        // 拒绝自动跟随 302，防止被重定向到内网
+        redirect: 'manual',
       })
+      if (resp.status >= 300 && resp.status < 400) {
+        return { error: '下载失败 (重定向被拒绝)' }
+      }
       if (!resp.ok) return { error: `下载失败 (${resp.status})` }
       const buffer = await resp.arrayBuffer()
       const base64 = Buffer.from(buffer).toString('base64')

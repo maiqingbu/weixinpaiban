@@ -281,11 +281,11 @@ const api = {
   imageGenCustomDelete: (providerId: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('image-gen:custom-delete', providerId),
   // Tavily Search
-  tavilySetKey: (apiKey: string): Promise<void> =>
+  tavilySetKey: (apiKey: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('tavily:set-key', apiKey),
-  tavilyGetKey: (): Promise<string | null> =>
+  tavilyGetKey: (): Promise<{ apiKey: string | null; configured: boolean }> =>
     ipcRenderer.invoke('tavily:get-key'),
-  tavilyDeleteKey: (): Promise<void> =>
+  tavilyDeleteKey: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('tavily:delete-key'),
   tavilySearch: (query: string, maxResults?: number): Promise<{ results: Array<{ title: string; url: string; content: string; score: number }>; error?: string }> =>
     ipcRenderer.invoke('tavily:search', query, maxResults),

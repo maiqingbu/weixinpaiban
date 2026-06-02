@@ -11,6 +11,15 @@ function cssPropsToString(props: React.CSSProperties): string {
     .join('; ')
 }
 
+/**
+ * 防止 CSS 内容中包含的 </style> 提前闭合 <style> 标签，
+ * 进而允许后续 HTML 中注入 <script> 等可执行内容。
+ * 通过把字符串 "</" 替换为 "<\/"（CSS 兼容转义）。
+ */
+function escapeStyleTag(css: string): string {
+  return css.replace(/<\/(style)/gi, '<\\/$1')
+}
+
 function generateThemeCSS(theme: Theme): string {
   const s = theme.styles
   return `
@@ -236,7 +245,7 @@ function PreviewRenderer({ html, theme }: PreviewRendererProps): React.JSX.Eleme
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: themeCSS }} />
+      <style dangerouslySetInnerHTML={{ __html: escapeStyleTag(themeCSS) }} />
       <div
         className={`theme-${theme.id}`}
         dangerouslySetInnerHTML={{ __html: cleanHtml }}

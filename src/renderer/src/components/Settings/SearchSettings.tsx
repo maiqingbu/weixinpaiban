@@ -16,10 +16,13 @@ function SearchSettings(): React.JSX.Element {
 
   const loadTavily = async () => {
     try {
-      const key = await window.api.tavilyGetKey()
-      if (key) {
-        setTavilyKey(key)
+      const result = await window.api.tavilyGetKey()
+      // 后端只返回是否配置（避免明文 key 通过 IPC 暴露给 renderer）
+      if (result?.configured) {
         setHasTavilyKey(true)
+        // 不在输入框回显原 key，用户可重新输入来更新
+      } else {
+        setHasTavilyKey(false)
       }
     } catch {
       // ignore

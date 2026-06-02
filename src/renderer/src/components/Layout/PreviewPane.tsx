@@ -215,14 +215,33 @@ function PreviewPane(): React.JSX.Element {
       }
     )
 
-    // 给所有 <img> 加 onerror，加载失败时原地替换为占位 div（不触发 React 状态变更）
-    html = html.replace(
-      /<img\b/gi,
-      '<img onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{style:{display:\'flex\',alignItems:\'center\',justifyContent:\'center\',height:\'180px\',background:\'#f3f4f6\',border:\'2px dashed #d1d5db\',borderRadius:\'8px\',margin:\'16px 0\',boxSizing:\'border-box\',maxWidth:\'100%\'},innerHTML:\'<span style=font-size:14px;color:#9ca3af;text-align:center;padding:0 24px>🖼 图片加载失败</span>\'}))"'
-    )
-
     return html
   }, [rawContent])
+
+  // 用事件代理替代字符串拼接的 onerror：捕获所有图片加载失败并替换为占位 div
+  // 避免恶意用户通过 <img src="x"foo"> 等畸形 HTML 逃逸 onerror 属性
+  useEffect(() => {
+    const root = contentRef.current
+    if (!root) return
+    const handler = (e: Event): void => {
+      const target = e.target as HTMLElement | null
+      if (target && target.tagName === 'IMG') {
+        const img = target as HTMLImageElement
+        // 用 placeholder div 替换失败的图片
+        const div = document.createElement('div')
+        div.style.cssText =
+          'display:flex;align-items:center;justify-content:center;height:180px;background:#f3f4f6;border:2px dashed #d1d5db;border-radius:8px;margin:16px 0;box-sizing:border-box;max-width:100%;'
+        div.innerHTML =
+          '<span style="font-size:14px;color:#9ca3af;text-align:center;padding:0 24px">🖼 图片加载失败</span>'
+        img.replaceWith(div)
+      }
+    }
+    // 用 capture 阶段捕获，error 事件不会冒泡
+    root.addEventListener('error', handler, true)
+    return () => {
+      root.removeEventListener('error', handler, true)
+    }
+  }, [safeContent])
 
   const isEmpty =
     !safeContent ||

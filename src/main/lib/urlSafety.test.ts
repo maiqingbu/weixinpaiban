@@ -99,3 +99,30 @@ describe('isPublicHttpUrl', () => {
     expect(isPublicHttpUrl('ftp://example.com')).toBe(false)
   })
 })
+
+describe('isSafeExternalUrl (SSRF defense)', () => {
+  it('blocks decimal/octal/hex IP encodings', () => {
+    // 127.0.0.1 写成十进制整数
+    expect(isSafeExternalUrl('http://2130706433/')).toBe(false)
+    // 十六进制
+    expect(isSafeExternalUrl('http://0x7f000001/')).toBe(false)
+    // IPv4-mapped IPv6
+    expect(isSafeExternalUrl('http://[::ffff:127.0.0.1]/')).toBe(false)
+  })
+
+  it('blocks file/gopher/javascript protocols', () => {
+    expect(isSafeExternalUrl('file:///etc/passwd')).toBe(false)
+    expect(isSafeExternalUrl('gopher://evil.com/')).toBe(false)
+    expect(isSafeExternalUrl('javascript:alert(1)')).toBe(false)
+    expect(isSafeExternalUrl('data:text/html,<script>alert(1)</script>')).toBe(false)
+  })
+
+  it('blocks userinfo with embedded creds', () => {
+    // 攻击者可能通过 userinfo 隐藏 host 部分
+    expect(isSafeExternalUrl('http://evil.com@127.0.0.1/')).toBe(false)
+  })
+
+  it('blocks 0.0.0.0 wildcard', () => {
+    expect(isSafeExternalUrl('http://0.0.0.0/')).toBe(false)
+  })
+})

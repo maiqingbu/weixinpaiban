@@ -5,6 +5,7 @@ import mammoth from 'mammoth'
 import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
 import { validateString, validateArray, validateObject, ValidationError } from '../lib/validation'
+import { isSafeExternalUrl } from '../lib/urlSafety'
 
 // pdf-parse 依赖 @napi-rs/canvas，需要 DOMMatrix polyfill
 // 使用动态 import 避免启动时崩溃
@@ -195,13 +196,19 @@ async function importUrl(url: string): Promise<ImportResult> {
     throw new Error('URL_INVALID:URL 格式不正确，请检查是否以 http:// 或 https:// 开头')
   }
 
+  // 阶段 1.5：SSRF 防护（拒绝内网/本地地址）
+  if (!isSafeExternalUrl(url)) {
+    throw new Error('SSRF_BLOCKED:不允许访问内网或本地地址')
+  }
+
   // 阶段 2：网络请求
   let response: Response
   try {
     response = await fetch(url, {
       headers: getHeadersForUrl(url),
       signal: AbortSignal.timeout(15000),
-      redirect: 'follow',
+      // 手动处理重定向：每跳都重新校验是否仍指向外网，防止 DNS rebinding
+      redirect: 'manual',
     })
   } catch (e: unknown) {
     const err = e as Error & { name?: string }
@@ -209,6 +216,39 @@ async function importUrl(url: string): Promise<ImportResult> {
       throw new Error('NETWORK_TIMEOUT:请求超时（15 秒），网络可能较慢或网站无响应')
     }
     throw new Error(`NETWORK_FAIL:无法访问该链接：${err.message}`)
+  }
+
+  // 阶段 2.5：手动跟随最多 3 次重定向，每次都校验 SSRF
+  let redirectCount = 0
+  while (response.status >= 300 && response.status < 400 && redirectCount < 3) {
+    const location = response.headers.get('location')
+    if (!location) break
+    let nextUrl: string
+    try {
+      nextUrl = new URL(location, url).toString()
+    } catch {
+      throw new Error('REDIRECT_INVALID:重定向地址格式不合法')
+    }
+    if (!isSafeExternalUrl(nextUrl)) {
+      throw new Error('SSRF_BLOCKED:重定向目标指向内网或本地地址')
+    }
+    try {
+      response = await fetch(nextUrl, {
+        headers: getHeadersForUrl(nextUrl),
+        signal: AbortSignal.timeout(15000),
+        redirect: 'manual',
+      })
+    } catch (e: unknown) {
+      const err = e as Error & { name?: string }
+      if (err.name === 'TimeoutError') {
+        throw new Error('NETWORK_TIMEOUT:请求超时（15 秒），网络可能较慢或网站无响应')
+      }
+      throw new Error(`NETWORK_FAIL:重定向请求失败：${err.message}`)
+    }
+    redirectCount++
+  }
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error('REDIRECT_LIMIT:重定向次数过多，已拒绝')
   }
 
   console.log('[import-url] response status', response.status, response.headers.get('content-type'))
@@ -333,6 +373,9 @@ export function registerImportHandlers(): void {
 
   ipcMain.handle('import:word', async (_event, filePath: unknown): Promise<ImportResult> => {
     const safePath = validateString(filePath, 'filePath', { minLength: 1, maxLength: 4096 })
+    if (safePath.includes('..') || safePath.includes('\0')) {
+      throw new ValidationError('文件路径不安全', 'filePath')
+    }
     if (!safePath.endsWith('.docx')) {
       throw new ValidationError('Word 导入只接受 .docx 文件', 'filePath')
     }
@@ -341,6 +384,9 @@ export function registerImportHandlers(): void {
 
   ipcMain.handle('import:markdown', async (_event, filePath: unknown): Promise<ImportResult> => {
     const safePath = validateString(filePath, 'filePath', { minLength: 1, maxLength: 4096 })
+    if (safePath.includes('..') || safePath.includes('\0')) {
+      throw new ValidationError('文件路径不安全', 'filePath')
+    }
     if (!safePath.endsWith('.md') && !safePath.endsWith('.markdown')) {
       throw new ValidationError('Markdown 导入只接受 .md 或 .markdown 文件', 'filePath')
     }
@@ -349,6 +395,9 @@ export function registerImportHandlers(): void {
 
   ipcMain.handle('import:pdf', async (_event, filePath: unknown): Promise<ImportResult> => {
     const safePath = validateString(filePath, 'filePath', { minLength: 1, maxLength: 4096 })
+    if (safePath.includes('..') || safePath.includes('\0')) {
+      throw new ValidationError('文件路径不安全', 'filePath')
+    }
     if (!safePath.endsWith('.pdf')) {
       throw new ValidationError('PDF 导入只接受 .pdf 文件', 'filePath')
     }

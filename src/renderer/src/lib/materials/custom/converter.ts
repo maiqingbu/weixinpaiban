@@ -1,13 +1,53 @@
+import DOMPurify from 'dompurify'
 import type { CustomMaterialKind } from '../types'
 
 // detectMaterialKind 需要返回 'columns' 类型，扩展类型定义
 
 /**
- * 清洁 HTML：剥掉 ProseMirror 注入的临时属性，只保留可视化必需的属性
+ * 清洁 HTML：剥掉 ProseMirror 注入的临时属性，再用 DOMPurify 兜底清洗
+ * - 移除 <script> / <iframe> / <object> / <embed> 等危险标签
+ * - 移除所有 on* 事件属性
+ * - 移除 javascript: 协议的链接
  */
 export function cleanHtml(html: string): string {
-  // 移除 ProseMirror 临时属性（保留 data-column、data-columns-container 等结构属性）
-  return html.replace(/\s(data-pm-slice|data-pm-type|data-node-view-content|data-id|data-type)[^"']*(?:"[^"]*"|'[^']*')?/gi, '')
+  if (!html || typeof html !== 'string') return ''
+  // 1. 移除 ProseMirror 临时属性（保留 data-column、data-columns-container 等结构属性）
+  const stripped = html.replace(
+    /\s(data-pm-slice|data-pm-type|data-node-view-content|data-id|data-type)[^"']*(?:"[^"]*"|'[^']*')?/gi,
+    ''
+  )
+  // 2. DOMPurify 兜底：只允许可视化标签，禁止脚本/事件/javascript: 链接
+  const ALLOWED_TAGS = [
+    'a', 'b', 'i', 'em', 'strong', 'u', 's', 'code', 'pre', 'br', 'hr',
+    'p', 'div', 'span', 'section', 'article', 'aside', 'header', 'footer', 'main', 'nav',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+    'blockquote', 'q', 'cite', 'abbr', 'mark', 'small', 'sub', 'sup', 'time',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
+    'img', 'figure', 'figcaption', 'video', 'audio', 'source',
+    'ruby', 'rp', 'rt',
+    'details', 'summary',
+    'del', 'ins', 'kbd', 'samp', 'var', 'wbr',
+  ]
+  try {
+    return DOMPurify.sanitize(stripped, {
+      ALLOWED_TAGS,
+      ALLOWED_ATTR: [
+        'class', 'style', 'href', 'target', 'rel', 'title', 'alt', 'src',
+        'width', 'height', 'colspan', 'rowspan', 'align', 'valign',
+        'id', 'data-columns-container', 'data-column', 'data-template-id',
+        'data-material-id', 'data-styled-block', 'data-styled-html', 'data-rotation',
+        'data-html', 'data-editable', 'data-editable-img', 'data-type', 'data-checked',
+        'controls', 'preload', 'poster', 'loop', 'muted', 'autoplay',
+      ],
+      ALLOW_DATA_ATTR: true,
+      KEEP_CONTENT: true,
+      ALLOW_UNKNOWN_PROTOCOLS: false, // 禁止 javascript: / data: 等危险协议
+    }) as string
+  } catch (err) {
+    console.error('[converter] Failed to sanitize HTML:', err)
+    return stripped
+  }
 }
 
 /**
@@ -102,7 +142,13 @@ export function addEditableMarkers(html: string): string {
 /**
  * 将选中的 HTML 转换为可保存的素材数据
  */
-export function selectionToMaterialData(html: string, name: string, keywords: string[]) {
+export function selectionToMaterialData(html: string, name: string, keywords: string[]): {
+  name: string
+  kind: CustomMaterialKind
+  keywords: string[]
+  thumbnail: string
+  html: string
+} {
   const cleanedHtml = cleanHtml(html)
   const kind = detectMaterialKind(cleanedHtml)
   const finalHtml = kind === 'template' ? addEditableMarkers(cleanedHtml) : cleanedHtml
