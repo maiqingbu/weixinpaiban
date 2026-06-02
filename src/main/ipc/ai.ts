@@ -238,11 +238,27 @@ export function registerAiHandlers(): void {
   })
 
   ipcMain.handle('ai:list-configured', async () => {
-    return getDb().prepare('SELECT provider_id, model_id FROM ai_keys').all() as Array<{
-      provider_id: string
-      model_id: string
-    }>
-  })
+  const rows = getDb().prepare('SELECT provider_id, model_id FROM ai_keys').all() as Array<{
+    provider_id: unknown
+    model_id: unknown
+  }>
+  // 防御性过滤：虽然 ai_keys.provider_id 是 TEXT PRIMARY KEY 理论上保证 string，
+  // 但老版本 / 升级后迁移 / SQLite type affinity 极端情况下可能存进来 null/number。
+  // 这里过滤掉非 string 的行，避免脏数据流向 renderer 端的 store，间接导致
+  // AIAssistant.generateSummary 等调用方把非 string provider_id 传给 ai:complete，
+  // 在 main 端第 297 行 validateString 抛 ValidationError: providerId must be a string。
+  return rows
+    .filter(
+      (r) =>
+        typeof r.provider_id === 'string' &&
+        r.provider_id.length > 0 &&
+        r.provider_id.length <= 100
+    )
+    .map((r) => ({
+      provider_id: r.provider_id as string,
+      model_id: typeof r.model_id === 'string' ? r.model_id : ''
+    }))
+})
 
   // ── Custom Provider CRUD ──
 
@@ -294,9 +310,24 @@ export function registerAiHandlers(): void {
   // ── AI Completion (streaming) ──
 
   ipcMain.handle('ai:complete', async (event, providerId: unknown, requestId: unknown, opts: unknown) => {
-    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
-    const safeRequestId = validateString(requestId, 'requestId', { minLength: 1, maxLength: 100 })
-    const input = validateAIInput(opts, 'opts')
+  // 顶层 providerId 必须 string，否则 fallback 到 'deepseek' + warn，
+  // 不再让 renderer 端的脏数据或 api:list-configured 边缘 case 把整个 AI 流程打挂。
+  // 历史上这里是 validateString(...) 抛 ValidationError，导致：
+  //   - AIAssistant.generateSummary 闪一下就关
+  //   - ChecklistPanel 摘要失败
+  //   - contentGenerator / AIBubbleMenu / Toolbar / titleAnalyzer 全部跑不了
+  const safeProviderId =
+    typeof providerId === 'string' && providerId.length > 0 && providerId.length <= 100
+      ? providerId
+      : (() => {
+          console.warn(
+            '[ai:complete] providerId is not a non-empty string, fallback to "deepseek". got:',
+            providerId
+          )
+          return 'deepseek'
+        })()
+  const safeRequestId = validateString(requestId, 'requestId', { minLength: 1, maxLength: 100 })
+  const input = validateAIInput(opts, 'opts')
 
     const keyData = getDb()
       .prepare('SELECT encrypted_key, model_id FROM ai_keys WHERE provider_id = ?')

@@ -14,12 +14,27 @@ export function createAIComplete(): (
   onChunk?: (text: string) => void
 ) => AIRequest {
   return (providerId: string, opts: AICompletionOptions, onChunk?: (text: string) => void): AIRequest => {
+    // 防御性类型检查：store 中的 configuredProviders[0].provider_id 在极端情况下
+    // 可能不是 string（老数据库 / 脏数据 / store 状态错位），如果不加保护会把
+    // 非 string 透传到 main 端 ai:complete handler 顶层 validateString 抛
+    // ValidationError: providerId must be a string，导致整个 AI 流程打挂。
+    // 这里在 renderer 端兜一层，统一 fallback 到 'deepseek' 并 warn。
+    const safeProviderId: string =
+      typeof providerId === 'string' && providerId.length > 0 && providerId.length <= 100
+        ? providerId
+        : 'deepseek'
+    if (safeProviderId !== providerId) {
+      console.warn(
+        '[ai-client] providerId is not a non-empty string, fallback to "deepseek". got:',
+        providerId
+      )
+    }
     const requestId = `ai-${++requestIdCounter}-${Date.now()}`
     let cancelled = false
     let cleanupListeners: (() => void) | null = null
 
     const promise = (async (): Promise<string> => {
-      const result = await window.api?.aiComplete(providerId, requestId, opts)
+      const result = await window.api?.aiComplete(safeProviderId, requestId, opts)
       if (!result) throw new Error('AI 功能不可用')
 
       return new Promise<string>((resolve: (v: string) => void, reject: (e: Error) => void) => {
