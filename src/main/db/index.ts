@@ -186,16 +186,20 @@ export function listSnapshots(articleId: number): ArticleSnapshot[] {
 }
 
 export function createSnapshot(articleId: number, content: string, wordCount: number): ArticleSnapshot {
-  // Enforce 30 max per article - delete oldest beyond limit
-  getDb().prepare(`
-    DELETE FROM article_snapshots WHERE article_id = ? AND id NOT IN (
-      SELECT id FROM article_snapshots WHERE article_id = ? ORDER BY created_at DESC LIMIT 30
-    )
-  `).run(articleId, articleId)
+  const db = getDb()
+  // 把 DELETE（清理超 30 条）和 INSERT 包到事务里，保证原子性
+  const tx = db.transaction(() => {
+    db.prepare(`
+      DELETE FROM article_snapshots WHERE article_id = ? AND id NOT IN (
+        SELECT id FROM article_snapshots WHERE article_id = ? ORDER BY created_at DESC LIMIT 30
+      )
+    `).run(articleId, articleId)
 
-  return getDb()
-    .prepare('INSERT INTO article_snapshots (article_id, content, word_count) VALUES (?, ?, ?) RETURNING id, article_id, content, word_count, created_at')
-    .get(articleId, content, wordCount) as ArticleSnapshot
+    return db
+      .prepare('INSERT INTO article_snapshots (article_id, content, word_count) VALUES (?, ?, ?) RETURNING id, article_id, content, word_count, created_at')
+      .get(articleId, content, wordCount) as ArticleSnapshot
+  })
+  return tx()
 }
 
 export function getSnapshot(id: number): ArticleSnapshot | null {
@@ -310,15 +314,18 @@ export function incrementMaterialUse(id: string): void {
 }
 
 export function updateCustomMaterialMeta(id: string, data: { name?: string; keywords?: string[]; group_id?: string | null }): boolean {
-  const existing = getCustomMaterial(id)
-  if (!existing) return false
   const db = getDb()
-  const now = Math.floor(Date.now() / 1000)
-  const name = data.name ?? existing.name
-  const keywords = data.keywords !== undefined ? JSON.stringify(data.keywords) : existing.keywords
-  const groupId = data.group_id !== undefined ? data.group_id : existing.group_id
-  db.prepare('UPDATE custom_materials SET name = ?, keywords = ?, group_id = ?, updated_at = ? WHERE id = ?').run(name, keywords, groupId, now, id)
-  return true
+  const tx = db.transaction(() => {
+    const existing = getCustomMaterial(id)
+    if (!existing) return false
+    const now = Math.floor(Date.now() / 1000)
+    const name = data.name ?? existing.name
+    const keywords = data.keywords !== undefined ? JSON.stringify(data.keywords) : existing.keywords
+    const groupId = data.group_id !== undefined ? data.group_id : existing.group_id
+    db.prepare('UPDATE custom_materials SET name = ?, keywords = ?, group_id = ?, updated_at = ? WHERE id = ?').run(name, keywords, groupId, now, id)
+    return true
+  })
+  return tx()
 }
 
 export function updateCustomMaterialHtml(id: string, html: string, thumbnail: string): boolean {
@@ -413,20 +420,24 @@ export function saveReadMoreLink(link: {
   const now = Math.floor(Date.now() / 1000)
   const isDefault = link.isDefault ? 1 : 0
 
-  db.prepare(`
-    INSERT INTO read_more_links (id, name, url, description, is_default, use_count, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      url = excluded.url,
-      description = excluded.description,
-      is_default = excluded.is_default,
-      updated_at = excluded.updated_at
-  `).run(id, link.name, link.url, link.description ?? '', isDefault, now, now)
+  // 把 INSERT + 取消其他默认 的两步操作包到事务里
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO read_more_links (id, name, url, description, is_default, use_count, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        url = excluded.url,
+        description = excluded.description,
+        is_default = excluded.is_default,
+        updated_at = excluded.updated_at
+    `).run(id, link.name, link.url, link.description ?? '', isDefault, now, now)
 
-  if (link.isDefault) {
-    db.prepare('UPDATE read_more_links SET is_default = 0 WHERE id != ?').run(id)
-  }
+    if (link.isDefault) {
+      db.prepare('UPDATE read_more_links SET is_default = 0 WHERE id != ?').run(id)
+    }
+  })
+  tx()
 
   return { id }
 }

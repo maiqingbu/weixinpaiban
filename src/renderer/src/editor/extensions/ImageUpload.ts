@@ -143,8 +143,11 @@ async function insertWithUpload(view: EditorView, file: File): Promise<void> {
       }
       return true
     })
+    // 成功：清理 fileStore
     fileStore.delete(placeholderId)
   } catch (e: any) {
+    // 失败：清理 fileStore（File 对象持有原始字节，会持续占内存）
+    fileStore.delete(placeholderId)
     // Mark as failed
     const doc = view.state.doc
     let found = false
