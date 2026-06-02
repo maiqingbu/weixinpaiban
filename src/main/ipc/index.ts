@@ -78,12 +78,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('article:update', async (_event, id: unknown, data: unknown) => {
     const safeId = validateId(id)
     const obj = validateObject<{
-      title?: string; content?: string; theme_id?: string; summary?: string
+      title?: string; content?: string; advanced_content?: string; theme_id?: string; summary?: string
       read_more_url?: string; read_more_text?: string
     }>(data, 'data')
     const sanitized: typeof obj = {}
     if (obj.title !== undefined) sanitized.title = validateString(obj.title, 'title', { allowEmpty: true, maxLength: MAX_NAME_LENGTH })
     if (obj.content !== undefined) sanitized.content = validateString(obj.content, 'content', { allowEmpty: true, maxLength: MAX_HTML_LENGTH })
+    if (obj.advanced_content !== undefined) sanitized.advanced_content = validateString(obj.advanced_content, 'advanced_content', { allowEmpty: true, maxLength: MAX_HTML_LENGTH })
     if (obj.theme_id !== undefined) {
       const themeId = validateStringOrNull(obj.theme_id, 'theme_id')
       sanitized.theme_id = themeId === null ? undefined : themeId

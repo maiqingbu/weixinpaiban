@@ -24,8 +24,10 @@ function EditorPane(): React.JSX.Element {
   const currentArticle = articles.find(a => a.id === currentArticleId)
   const articleContent = currentArticle?.content || ''
 
-  // 计算高级编辑器的初始内容 — 以当前选中文章的 DB 内容为准
-  const advancedInitialContent = articleContent || editorContent
+  // 高级编辑器初始内容：优先用该文章上次保存到高级编辑器的内容（advanced_content），
+  // 否则回退到标准编辑器 content，再次回退到当前编辑 state。
+  const advancedInitialContent =
+    currentArticle?.advanced_content || articleContent || editorContent
 
   // 当文章切换时，推送内容到编辑器窗口
   useEffect(() => {

@@ -25,8 +25,13 @@ function EditorWindow(): React.JSX.Element {
     }
     window.addEventListener('beforeunload', onBeforeUnload)
 
+    // 注意：不在 cleanup 中移除 set-content 监听。
+    // React 18 StrictMode 下 useEffect 会执行 mount → cleanup → mount，
+    // 同步移除再注册会与 Electron 极快的 IPC 时序产生竞态：
+    //   - 第二次 mount 之前，主进程的 set-content 消息可能已到达 renderer
+    //   - 此时 handler 已被移除，新 handler 尚未注册 → 消息丢失 → 编辑器空白
+    // 不移除 handler 不会造成泄漏：window 关闭时整个 renderer 进程销毁，所有 ipcRenderer listener 自动清理。
     return () => {
-      window.api.editorOffSetContent(handler)
       window.removeEventListener('beforeunload', onBeforeUnload)
     }
   }, [])
