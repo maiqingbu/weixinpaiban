@@ -1,5 +1,46 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
+
+const electronAPI = {
+  ipcRenderer: {
+    send(channel: string, ...args: unknown[]) {
+      ipcRenderer.send(channel, ...args)
+    },
+    sendTo(_webContentsId: number, _channel: string, ..._args: unknown[]) {
+      throw new Error('"sendTo" method has been removed since Electron 28.')
+    },
+    sendSync(channel: string, ...args: unknown[]) {
+      return ipcRenderer.sendSync(channel, ...args)
+    },
+    sendToHost(channel: string, ...args: unknown[]) {
+      ipcRenderer.sendToHost(channel, ...args)
+    },
+    postMessage(channel: string, message: unknown, transfer?: MessagePort[]) {
+      ipcRenderer.postMessage(channel, message, transfer)
+    },
+    invoke(channel: string, ...args: unknown[]) {
+      return ipcRenderer.invoke(channel, ...args)
+    },
+    on(channel: string, listener: (...args: unknown[]) => void) {
+      ipcRenderer.on(channel, listener as any)
+      return () => {
+        ipcRenderer.removeListener(channel, listener as any)
+      }
+    },
+    once(channel: string, listener: (...args: unknown[]) => void) {
+      ipcRenderer.once(channel, listener as any)
+      return () => {
+        ipcRenderer.removeListener(channel, listener as any)
+      }
+    },
+    removeListener(channel: string, listener: (...args: unknown[]) => void) {
+      ipcRenderer.removeListener(channel, listener as any)
+      return this
+    },
+    removeAllListeners(channel: string) {
+      ipcRenderer.removeAllListeners(channel)
+    }
+  }
+}
 
 interface Article {
   id: number
@@ -230,8 +271,8 @@ const api = {
     ipcRenderer.invoke('image-gen:get-key', providerId),
   imageGenDeleteKey: (providerId: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('image-gen:delete-key', providerId),
-  imageGenGenerate: (providerId: string, apiBase: string, modelId: string, prompt: string): Promise<string[]> =>
-    ipcRenderer.invoke('image-gen:generate', providerId, apiBase, modelId, prompt),
+  imageGenGenerate: (providerId: string, apiBase: string, modelId: string, prompt: string, bodyOverrides?: Record<string, unknown>): Promise<string[]> =>
+    ipcRenderer.invoke('image-gen:generate', providerId, apiBase, modelId, prompt, bodyOverrides),
   // Custom Image Gen Providers
   imageGenCustomList: (): Promise<Array<{ id: string; name: string; api_base: string; default_model: string; models_json: string; docs_url: string; description: string }>> =>
     ipcRenderer.invoke('image-gen:custom-list'),
@@ -267,6 +308,10 @@ const api = {
     ipcRenderer.on('editor:saved', callback),
   editorOffSaved: (callback: (...args: any[]) => void) =>
     ipcRenderer.removeListener('editor:saved', callback),
+  editorOnClosed: (callback: () => void) =>
+    ipcRenderer.on('editor:closed', callback),
+  editorOffClosed: (callback: () => void) =>
+    ipcRenderer.removeListener('editor:closed', callback),
 }
 
 if (process.contextIsolated) {

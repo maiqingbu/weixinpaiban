@@ -7,16 +7,27 @@ function EditorWindow(): React.JSX.Element {
   // 编辑器当前内容存 ref，避免回流触发 TinyMCE React 内部 setContent
   const contentRef = useRef('')
   const [saved, setSaved] = useState(false)
+  // 外部推送内容时递增 key，强制 TinyMCE 重新挂载以显示新文章
+  const [editorKey, setEditorKey] = useState(0)
 
   useEffect(() => {
     const handler = (_event: any, html: string) => {
       contentRef.current = html
       setExternalContent(html)
+      setEditorKey(k => k + 1)
     }
     window.api.editorOnSetContent(handler)
     window.api.editorReady()
+
+    // 窗口关闭时（macOS X 按钮 / Cmd+W）自动保存
+    const onBeforeUnload = () => {
+      window.api.editorSave(contentRef.current)
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+
     return () => {
       window.api.editorOffSetContent(handler)
+      window.removeEventListener('beforeunload', onBeforeUnload)
     }
   }, [])
 
@@ -31,6 +42,7 @@ function EditorWindow(): React.JSX.Element {
   }, [])
 
   const handleClose = useCallback(() => {
+    window.api.editorSave(contentRef.current)
     window.api.editorClose()
   }, [])
 
@@ -65,6 +77,7 @@ function EditorWindow(): React.JSX.Element {
       {/* 编辑器 */}
       <div className="flex-1 min-h-0">
         <TinyMCEditor
+          key={editorKey}
           initialContent={externalContent}
           onChange={handleChange}
         />

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import { Editor } from '@tinymce/tinymce-react'
 import 'tinymce/tinymce'
 import 'tinymce/themes/silver'
@@ -48,6 +48,17 @@ function TinyMCEditor({ initialContent, onChange }: AdvancedEditorProps): React.
       logState(`event#${changeCount}(${editor.isDirty() ? 'dirty' : 'clean'})`)
     })
   }, [])
+
+  // 当外部推送新内容时（切换文章），同步到编辑器
+  useEffect(() => {
+    const editor = editorRef.current
+    if (editor && initialContent) {
+      const current = editor.getContent()
+      if (initialContent !== current) {
+        editor.setContent(initialContent)
+      }
+    }
+  }, [initialContent])
 
   const handleEditorChange = useCallback((content: string) => {
     onChange?.(content)

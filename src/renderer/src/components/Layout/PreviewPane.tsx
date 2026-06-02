@@ -183,7 +183,7 @@ function PreviewPane(): React.JSX.Element {
   const [editorOpen, setEditorOpen] = useState(false)
 
   // 根据当前激活的编辑器决定显示内容
-  const displayContent = activeEditor === 'advanced' ? advancedEditorContent : editorContent
+  const rawContent = activeEditor === 'advanced' ? advancedEditorContent : editorContent
 
   // Scaled preview state
   const containerRef = useRef<HTMLDivElement>(null)
@@ -192,10 +192,42 @@ function PreviewPane(): React.JSX.Element {
   const [scaledHeight, setScaledHeight] = useState(0)
   const [offsetLeft, setOffsetLeft] = useState(0)
 
+  const placeholderDiv = (text: string): string =>
+    `<div style="display:flex;align-items:center;justify-content:center;height:180px;background:#f3f4f6;border:2px dashed #d1d5db;border-radius:8px;margin:16px 0;box-sizing:border-box;max-width:100%;"><span style="font-size:14px;color:#9ca3af;text-align:center;padding:0 24px;">🖼 ${text}</span></div>`
+
+  // 替换占位符为稳定元素，防止预览跳动：
+  // 1. <!-- IMG:xxx --> 注释占位符
+  // 2. via.placeholder.com / placehold.co 外部占位图片（国内不可达）
+  // 3. 所有 <img> 添加 onerror 兜底处理
+  const safeContent = useMemo(() => {
+    let html = rawContent
+
+    html = html.replace(
+      /<!--\s*IMG:\s*(.*?)\s*-->/g,
+      (_m, desc: string) => placeholderDiv(desc.trim() || '配图占位')
+    )
+
+    html = html.replace(
+      /<img\b[^>]*\bsrc\s*=\s*"(https?:\/\/(?:via\.placeholder\.com|placehold\.co)[^"]*)"[^>]*>/gi,
+      (_m, src: string) => {
+        const text = decodeURIComponent(src.match(/text=([^&]*)/)?.[1] || '占位图片')
+        return placeholderDiv(text)
+      }
+    )
+
+    // 给所有 <img> 加 onerror，加载失败时原地替换为占位 div（不触发 React 状态变更）
+    html = html.replace(
+      /<img\b/gi,
+      '<img onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{style:{display:\'flex\',alignItems:\'center\',justifyContent:\'center\',height:\'180px\',background:\'#f3f4f6\',border:\'2px dashed #d1d5db\',borderRadius:\'8px\',margin:\'16px 0\',boxSizing:\'border-box\',maxWidth:\'100%\'},innerHTML:\'<span style=font-size:14px;color:#9ca3af;text-align:center;padding:0 24px>🖼 图片加载失败</span>\'}))"'
+    )
+
+    return html
+  }, [rawContent])
+
   const isEmpty =
-    !displayContent ||
-    displayContent === '<p></p>' ||
-    displayContent === '<p><br></p>'
+    !safeContent ||
+    safeContent === '<p></p>' ||
+    safeContent === '<p><br></p>'
 
   // Measure and update scale on container resize & content change
   useLayoutEffect(() => {
@@ -203,8 +235,6 @@ function PreviewPane(): React.JSX.Element {
     const content = contentRef.current
     if (!container || isEmpty) return
 
-    let raf = 0
-    let debounceTimer = 0
     const update = () => {
       const cw = container.clientWidth
       const newScale = Math.max(MIN_SCALE, Math.min(cw / CONTENT_WIDTH, 1))
@@ -214,43 +244,21 @@ function PreviewPane(): React.JSX.Element {
       setOffsetLeft(Math.max(0, (cw - scaledW) / 2))
     }
 
-    const debouncedUpdate = () => {
-      cancelAnimationFrame(raf)
+    update()
+
+    let debounceTimer = 0
+    const ro = new ResizeObserver(() => {
       clearTimeout(debounceTimer)
-      debounceTimer = window.setTimeout(() => {
-        raf = requestAnimationFrame(update)
-      }, 80)
-    }
-
-    const images = content ? Array.from(content.querySelectorAll('img')) : []
-    let pendingImages = images.filter(img => !img.complete).length
-    const onImageReady = () => {
-      pendingImages--
-      if (pendingImages <= 0) update()
-    }
-    images.forEach(img => {
-      if (!img.complete) {
-        img.addEventListener('load', onImageReady, { once: true })
-        img.addEventListener('error', onImageReady, { once: true })
-      }
+      debounceTimer = window.setTimeout(update, 100)
     })
-
-    if (pendingImages === 0) update()
-
-    const ro = new ResizeObserver(() => debouncedUpdate())
     ro.observe(container)
     if (content) ro.observe(content)
 
     return () => {
       ro.disconnect()
-      cancelAnimationFrame(raf)
       clearTimeout(debounceTimer)
-      images.forEach(img => {
-        img.removeEventListener('load', onImageReady)
-        img.removeEventListener('error', onImageReady)
-      })
     }
-  }, [displayContent, isEmpty])
+  }, [safeContent, isEmpty])
 
   const loadCustomThemes = useCallback(() => {
     window.api?.customThemeList?.().then((list) => {
@@ -349,10 +357,10 @@ function PreviewPane(): React.JSX.Element {
               }}
             >
               {activeEditor === 'advanced' ? (
-                <div dangerouslySetInnerHTML={{ __html: displayContent }} />
+                <div dangerouslySetInnerHTML={{ __html: safeContent }} />
               ) : (
                 <ThemeProvider themeId={currentThemeId}>
-                  <PreviewRenderer html={displayContent} theme={theme} />
+                  <PreviewRenderer html={safeContent} theme={theme} />
                 </ThemeProvider>
               )}
             </div>

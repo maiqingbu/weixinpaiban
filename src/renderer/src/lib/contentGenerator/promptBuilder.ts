@@ -6,9 +6,11 @@ import type { ContentGenConfig } from './types';
 
 /** 字数映射 */
 const LENGTH_MAP = {
+  micro: '约 500 字（短消息/快讯风格）',
   short: '约 800 字（快讯/简报风格）',
   medium: '约 1500 字（标准公众号文章）',
   long: '约 3000 字（深度长文）',
+  epic: '约 5000 字（超长深度长文）',
 } as const;
 
 /** 语气描述 */

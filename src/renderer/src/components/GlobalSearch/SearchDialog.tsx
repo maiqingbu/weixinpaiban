@@ -35,6 +35,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps): React.J
 
   const setCurrentArticleId = useAppStore((s) => s.setCurrentArticleId)
   const setEditorContent = useAppStore((s) => s.setEditorContent)
+  const setAdvancedEditorContent = useAppStore((s) => s.setAdvancedEditorContent)
   const articles = useAppStore((s) => s.articles)
 
   // Build recent articles list
@@ -95,6 +96,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps): React.J
       if (article) {
         setCurrentArticleId(id)
         setEditorContent(article.content || '<p></p>')
+        setAdvancedEditorContent(article.advanced_content || '')
         window.api?.articleUpdateLastOpened(id)
       }
       onOpenChange(false)

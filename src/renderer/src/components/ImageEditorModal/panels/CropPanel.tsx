@@ -37,6 +37,8 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
   const gridLinesRef = useRef<any[]>([])
   const guidesRef = useRef<any[]>([])
   const isSyncing = useRef(false)
+  // 旋转裁剪框时跳过比例约束（仅做边界限制）
+  const skipRatioRef = useRef(false)
 
   // ── 创建裁剪 UI ──
   const createCropUI = useCallback(() => {
@@ -85,7 +87,6 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
     // ── 三分线 ──
     const lines: any[] = []
     for (let i = 1; i <= 2; i++) {
-      // 竖线
       const vl = new Rect({
         left: cl + (cw / 3) * i,
         top: ct,
@@ -96,7 +97,6 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
         evented: false,
         data: { type: 'cropGrid' },
       })
-      // 横线
       const hl = new Rect({
         left: cl,
         top: ct + (ch / 3) * i,
@@ -115,10 +115,10 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
     // ── 四条白色边线（裁剪框轮廓） ──
     const borders: any[] = []
     const borderSpecs = [
-      { left: cl, top: ct, width: cw, height: 1.5 },                    // top
-      { left: cl, top: ct + ch - 1.5, width: cw, height: 1.5 },         // bottom
-      { left: cl, top: ct, width: 1.5, height: ch },                     // left
-      { left: cl + cw - 1.5, top: ct, width: 1.5, height: ch },         // right
+      { left: cl, top: ct, width: cw, height: 1.5 },
+      { left: cl, top: ct + ch - 1.5, width: cw, height: 1.5 },
+      { left: cl, top: ct, width: 1.5, height: ch },
+      { left: cl + cw - 1.5, top: ct, width: 1.5, height: ch },
     ]
     for (const spec of borderSpecs) {
       const line = new Rect({
@@ -152,7 +152,6 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
       cornerSize: 10,
       cornerStyle: 'circle',
       transparentCorners: false,
-      // 只显示四角控制点，隐藏边中点
       ...({ mt: { visible: false }, mb: { visible: false }, ml: { visible: false }, mr: { visible: false } } as any),
     })
     ;(cropRect as any).data = { type: 'cropRect' }
@@ -172,12 +171,8 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
       const w = (cropRect.width ?? cw) * (cropRect.scaleX ?? 1)
       const h = (cropRect.height ?? ch) * (cropRect.scaleY ?? 1)
 
-      // 更新遮罩
+      // 重建遮罩路径
       if (maskRef.current) {
-        maskRef.current.set({ path: createMaskPath(img, { left, top, width: w, height: h }).split(' ').map((s, i) => i === 0 ? s : s) as any })
-        // FabricPath 需要用 setPath 来更新
-        maskRef.current.set({ d: createMaskPath(img, { left, top, width: w, height: h }) })
-        // 更可靠的方式：重新创建
         canvas.remove(maskRef.current)
         const newMask = new FabricPath(createMaskPath(img, { left, top, width: w, height: h }), {
           fill: 'rgba(0, 0, 0, 0.55)',
@@ -191,16 +186,13 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
         maskRef.current = newMask
       }
 
-      // 更新三分线
+      // 更新三分线 + 边框
       const grid = gridLinesRef.current
       if (grid.length >= 8) {
-        // 竖线 x2
         grid[0].set({ left: left + w / 3, top, height: h })
         grid[2].set({ left: left + (w * 2) / 3, top, height: h })
-        // 横线 x2
         grid[1].set({ left, top: top + h / 3, width: w })
         grid[3].set({ left, top: top + (h * 2) / 3, width: w })
-        // 边框 x4
         grid[4].set({ left, top, width: w })
         grid[5].set({ left, top: top + h - 1.5, width: w })
         grid[6].set({ left, top, height: h })
@@ -223,21 +215,20 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
       let w = (cropRect.width ?? cw) * (cropRect.scaleX ?? 1)
       let h = (cropRect.height ?? ch) * (cropRect.scaleY ?? 1)
 
-      // 最小尺寸
       w = Math.max(w, 20)
       h = Math.max(h, 20)
 
-      // 比例约束
-      if (ratio) {
+      // 比例约束（旋转裁剪框时跳过）
+      if (ratio && !skipRatioRef.current) {
         if (w / h > ratio) w = h * ratio
         else h = w / ratio
       }
+      skipRatioRef.current = false
 
       // 边界约束（不允许超出图片）
       const clampedLeft = Math.max(img.left, Math.min(left, img.left + img.width - w))
       const clampedTop = Math.max(img.top, Math.min(top, img.top + img.height - h))
 
-      // 如果宽高被修正，重置 scale 为 1 并更新 width/height
       if (Math.abs(w - (cropRect.width ?? cw) * (cropRect.scaleX ?? 1)) > 1 ||
           Math.abs(h - (cropRect.height ?? ch) * (cropRect.scaleY ?? 1)) > 1) {
         cropRect.set({ scaleX: 1, scaleY: 1, width: w, height: h })
@@ -266,13 +257,12 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
   }, [canvas, mainImage, createCropUI])
 
   // ── 确认裁剪 ──
-  const handleApply = async () => {
+  const handleApply = useCallback(() => {
     if (!canvas || !mainImage || !cropRectRef.current) return
 
     const cropRect = cropRectRef.current
     const imgBounds = getImageBounds(mainImage)
 
-    // 裁剪区域（画布坐标）
     const cropLeft = cropRect.left ?? 0
     const cropTop = cropRect.top ?? 0
     const cropW = (cropRect.width ?? 0) * (cropRect.scaleX ?? 1)
@@ -288,11 +278,9 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
     cropRectRef.current = null
     canvas.renderAll()
 
-    // 高清倍率
     const m = 2
 
     try {
-      // 导出图片区域
       const dataUrl = canvas.toDataURL({
         format: 'png',
         left: imgBounds.left,
@@ -304,7 +292,6 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
 
       const img = new Image()
       img.onload = () => {
-        // 在离屏 canvas 上裁剪
         const outCanvas = document.createElement('canvas')
         const sx = Math.round((cropLeft - imgBounds.left) * m)
         const sy = Math.round((cropTop - imgBounds.top) * m)
@@ -343,22 +330,29 @@ const CropPanel: React.FC<CropPanelProps> = ({ canvas, mainImage, onApply, onCan
     } catch (e) {
       console.error('[CropPanel] crop failed:', e)
     }
-  }
+  }, [canvas, mainImage, onApply])
 
-  // ── 旋转裁剪框 90° ──
-  const handleRotateCrop = () => {
+  // ── 旋转裁剪框 90°（跳过比例约束，仅做边界限制） ──
+  const handleRotateCrop = useCallback(() => {
     const rect = cropRectRef.current
-    if (!rect) return
+    if (!rect || !mainImage) return
     const w = rect.width
     const h = rect.height
-    // 交换宽高（scale 已被约束为 1）
     rect.set({ width: h, height: w })
     rect.setCoords()
 
-    // 触发遮罩同步
+    // 边界约束（不重新应用比例）
+    const img = getImageBounds(mainImage)
+    const clampedLeft = Math.max(img.left, Math.min(rect.left ?? 0, img.left + img.width - h))
+    const clampedTop = Math.max(img.top, Math.min(rect.top ?? 0, img.top + img.height - w))
+    rect.set({ left: clampedLeft, top: clampedTop })
+    rect.setCoords()
+
+    // 标记跳过比例约束，然后触发同步
+    skipRatioRef.current = true
     rect.fire('modified')
     canvas?.renderAll()
-  }
+  }, [canvas, mainImage])
 
   return (
     <div className="p-3 space-y-3">

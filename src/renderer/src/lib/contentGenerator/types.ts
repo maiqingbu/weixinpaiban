@@ -52,7 +52,7 @@ export interface GeneratorConfig {
   topic: string;
   keywords: string[];
   tone: string;
-  length: 'short' | 'medium' | 'long';
+  length: 'micro' | 'short' | 'medium' | 'long' | 'epic';
   audience: string;
   extras: {
     dataChart: boolean;
@@ -79,9 +79,11 @@ export const TONE_OPTIONS = [
 ] as const;
 
 export const LENGTH_OPTIONS = [
+  { value: 'micro', label: '500字', description: '短消息/快讯' },
   { value: 'short', label: '800字', description: '快讯/简报' },
   { value: 'medium', label: '1500字', description: '标准文章' },
   { value: 'long', label: '3000字', description: '深度长文' },
+  { value: 'epic', label: '5000字', description: '超长深度' },
 ] as const;
 
 export const AUDIENCE_OPTIONS = [
@@ -105,7 +107,7 @@ export interface ContentGenConfig {
   topic?: string;
   keywords?: string[];
   tone?: string;
-  length?: 'short' | 'medium' | 'long';
+  length?: 'micro' | 'short' | 'medium' | 'long' | 'epic';
   audience?: string;
   enableWebSearch?: boolean;
   extras?: {

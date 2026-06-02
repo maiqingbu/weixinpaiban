@@ -5,16 +5,18 @@ export const BaichuanProvider: AIProvider = {
   config: {
     id: 'baichuan',
     name: '百川智能',
-    defaultModel: 'Baichuan4',
+    defaultModel: 'Baichuan4-Turbo',
     models: [
-      { id: 'Baichuan4', name: 'Baichuan4（最强）', license: '商用许可' },
-      { id: 'Baichuan3-Turbo', name: 'Baichuan3 Turbo（推荐）', license: '商用许可' },
+      { id: 'Baichuan4', name: 'Baichuan4（旗舰）', license: '商用许可' },
+      { id: 'Baichuan4-Turbo', name: 'Baichuan4 Turbo（推荐）', license: '商用许可' },
+      { id: 'Baichuan4-Air', name: 'Baichuan4 Air（高性价比）', license: '商用许可' },
+      { id: 'Baichuan3-Turbo', name: 'Baichuan3 Turbo', license: '商用许可' },
     ],
     apiBase: 'https://api.baichuan-ai.com/v1',
     docsUrl: 'https://platform.baichuan-ai.com/console/apikey',
     keyHint: 'sk-...',
     license: '商用许可，详情见百川智能开放平台服务协议',
-    description: '中文大模型，擅长内容创作和知识问答',
+    description: '中文大模型，SuperCLUE 国内第一，擅长知识问答和创作',
   },
   complete(apiKey, model, opts) {
     return openAICompatibleCompletion(this.config.apiBase, apiKey, model, opts)

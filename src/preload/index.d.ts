@@ -1,4 +1,21 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
+import type { IpcRendererEvent } from 'electron'
+
+export {}
+
+interface ElectronAPI {
+  ipcRenderer: {
+    send(channel: string, ...args: unknown[]): void
+    sendTo(webContentsId: number, channel: string, ...args: unknown[]): void
+    sendSync(channel: string, ...args: unknown[]): unknown
+    sendToHost(channel: string, ...args: unknown[]): void
+    postMessage(channel: string, message: unknown, transfer?: MessagePort[]): void
+    invoke(channel: string, ...args: unknown[]): Promise<unknown>
+    on(channel: string, listener: (...args: unknown[]) => void): () => void
+    once(channel: string, listener: (...args: unknown[]) => void): () => void
+    removeListener(channel: string, listener: (...args: unknown[]) => void): ElectronAPI['ipcRenderer']
+    removeAllListeners(channel: string): void
+  }
+}
 
 interface Article {
   id: number
@@ -134,7 +151,7 @@ interface Api {
   imageGenSaveKey: (providerId: string, apiKey: string, modelId: string) => Promise<{ success: boolean }>
   imageGenGetKey: (providerId: string) => Promise<{ api_key: string; model_id: string } | null>
   imageGenDeleteKey: (providerId: string) => Promise<{ success: boolean }>
-  imageGenGenerate: (providerId: string, apiBase: string, modelId: string, prompt: string) => Promise<string[]>
+  imageGenGenerate: (providerId: string, apiBase: string, modelId: string, prompt: string, bodyOverrides?: Record<string, unknown>) => Promise<string[]>
   // Custom Image Gen Providers
   imageGenCustomList: () => Promise<Array<{ id: string; name: string; api_base: string; default_model: string; models_json: string; docs_url: string; description: string }>>
   imageGenCustomSave: (provider: { id?: string; name: string; apiBase: string; defaultModel: string; models: Array<{ id: string; name: string }>; docsUrl?: string; description?: string }) => Promise<{ id: string }>

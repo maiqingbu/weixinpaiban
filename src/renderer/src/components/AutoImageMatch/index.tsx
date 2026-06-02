@@ -1,18 +1,33 @@
 import { useState, useRef, useEffect } from 'react'
-import { Sparkles, Loader2, CheckCircle2, AlertTriangle, RefreshCw, ImagePlus, ChevronDown } from 'lucide-react'
+import { Sparkles, Loader2, CheckCircle2, AlertTriangle, RefreshCw, ImagePlus, ChevronDown, Search, Wand2, Trash2, Play } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import { Button } from '@/components/ui/button'
 import { getImageGenProvider } from '@/lib/imageGen/providers'
 
 // ── Types ──
 
+type Ratio = '16:9' | '1:1' | '3:4'
+type SlotMode = 'search' | 'gen'
+
+const RATIO_OPTIONS: { value: Ratio; label: string; size: string }[] = [
+  { value: '16:9', label: '横版 16:9', size: '1792x1024' },
+  { value: '1:1', label: '方形 1:1', size: '1024x1024' },
+  { value: '3:4', label: '竖版 3:4', size: '1024x1792' },
+]
+
+function ratioSize(ratio: Ratio): string {
+  return RATIO_OPTIONS.find((r) => r.value === ratio)?.size || '1024x1024'
+}
+
 interface ImageSlot {
   afterBlock: number
   desc: string
   query: string
   genPrompt: string
-  images: string[]       // base64 data URLs
-  selectedIndex: number  // -1 = none selected
+  mode: SlotMode
+  ratio: Ratio
+  images: string[]
+  selectedIndex: number
   loading: boolean
 }
 
@@ -45,6 +60,7 @@ const AUTO_MATCH_PROMPT = `你是一位公众号资深美术编辑，精通 AI �
 genPrompt 必须遵循以下规范（重要）：
 - 语言：全中文，自然语言描述，不要英文标签堆砌
 - 长度：20-50 字
+- 末尾必须追加"无文字无LOGO无水印"，确保生成的图片不包含任何文字、品牌标识、AI生成水印
 - 内容必须包含：
   1. 主体/场景：画面核心内容是什么
   2. 构图：近景/中景/远景/特写/平视/俯视 等
@@ -53,9 +69,9 @@ genPrompt 必须遵循以下规范（重要）：
   5. 品质词：高清细腻 或 简洁干净 或 质感高级 等（1-2个即可）
 
 genPrompt 正确示例：
-  "城市天际线夜景，中景平视构图，现代建筑玻璃幕墙倒映灯火，写实摄影风格，蓝紫色调冷暖对比，高清细腻"
-  "办公桌上笔记本电脑旁一杯热咖啡，45度近景特写，柔和晨光从窗户斜射，温馨生活摄影风格，暖黄色调，简洁干净"
-  "绿色山坡上一棵孤树，远景俯视构图，蓝天白云大片留白，极简治愈插画风格，明亮自然色调，简洁干净"
+  "城市天际线夜景，中景平视构图，现代建筑玻璃幕墙倒映灯火，写实摄影风格，蓝紫色调冷暖对比，高清细腻，无文字无LOGO无水印"
+  "办公桌上笔记本电脑旁一杯热咖啡，45度近景特写，柔和晨光从窗户斜射，温馨生活摄影风格，暖黄色调，简洁干净，无文字无LOGO无水印"
+  "绿色山坡上一棵孤树，远景俯视构图，蓝天白云大片留白，极简治愈插画风格，明亮自然色调，简洁干净，无文字无LOGO无水印"
 
 genPrompt 错误示例（不要这样写）：
   ✗ "黄山日出云海" — 太短，没有风格和构图
@@ -100,7 +116,6 @@ function getIndexedBlocks(editor: Editor | null): { text: string; blocks: { pos:
     }
   })
 
-  // Use first text block as title if no heading found
   if (!title && blocks.length > 0) {
     editor.state.doc.descendants((node) => {
       if (!title && node.isBlock && node.textContent.trim()) {
@@ -145,18 +160,19 @@ function parseAiResponse(text: string): { images: AiImageResult[]; articleStyle:
 // ── Component ──
 
 function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.JSX.Element | null {
-  const [phase, setPhase] = useState<'analyzing' | 'selecting' | 'inserting' | 'done'>('analyzing')
+  const [phase, setPhase] = useState<'analyzing' | 'planning' | 'generating' | 'selecting' | 'inserting' | 'done'>('analyzing')
   const [statusMsg, setStatusMsg] = useState('')
   const [error, setError] = useState('')
   const [slots, setSlots] = useState<ImageSlot[]>([])
   const [insertCount, setInsertCount] = useState(0)
   const [articleStyle, setArticleStyle] = useState('')
+  const [generatingProgress, setGeneratingProgress] = useState({ done: 0, total: 0 })
   const startedRef = useRef(false)
   const blocksRef = useRef<{ pos: number; nodeSize: number }[]>([])
 
-  const [genProviders, setGenProviders] = useState<Array<{ id: string; name: string; apiBase: string; modelId: string }>>([])
+  const [genProviders, setGenProviders] = useState<Array<{ id: string; name: string; apiBase: string; modelId: string; bodyOverrides?: Record<string, unknown> }>>([])
   const [selectedGenId, setSelectedGenId] = useState('')
-  const genProvidersRef = useRef<Array<{ id: string; name: string; apiBase: string; modelId: string }>>([])
+  const genProvidersRef = useRef<Array<{ id: string; name: string; apiBase: string; modelId: string; bodyOverrides?: Record<string, unknown> }>>([])
   const selectedGenIdRef = useRef('')
 
   useEffect(() => {
@@ -175,6 +191,7 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
       setSlots([])
       setInsertCount(0)
       setArticleStyle('')
+      setGeneratingProgress({ done: 0, total: 0 })
     }
   }, [open])
 
@@ -182,6 +199,8 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     selectedGenIdRef.current = selectedGenId
     genProvidersRef.current = genProviders
   }, [selectedGenId, genProviders])
+
+  const hasGenProvider = genProviders.length > 0 && selectedGenId !== ''
 
   const loadGenProviders = async () => {
     let configured: Array<{ provider_id: string; model_id: string }> = []
@@ -193,7 +212,7 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     const list = configured
       .map((c) => {
         const p = getImageGenProvider(c.provider_id)
-        if (p) return { id: p.id, name: p.name, apiBase: p.apiBase, modelId: c.model_id || p.models[0]?.id || '' }
+        if (p) return { id: p.id, name: p.name, apiBase: p.apiBase, modelId: c.model_id || p.models[0]?.id || '', bodyOverrides: p.bodyOverrides }
         const cp = customs.find((x) => x.id === c.provider_id)
         if (cp) {
           const cpModels: Array<{ id: string }> = JSON.parse(cp.models_json || '[]')
@@ -201,7 +220,7 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
         }
         return null
       })
-      .filter(Boolean) as Array<{ id: string; name: string; apiBase: string; modelId: string }>
+      .filter(Boolean) as Array<{ id: string; name: string; apiBase: string; modelId: string; bodyOverrides?: Record<string, unknown> }>
 
     const selectedId = list[0]?.id || ''
     genProvidersRef.current = list
@@ -210,7 +229,7 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     return { list, selectedId }
   }
 
-  // ── Phase 1: AI analysis ──
+  // ── Phase 1: AI analysis → planning ──
 
   const runAnalysis = async () => {
     if (!editor) return
@@ -268,20 +287,21 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
         return
       }
 
+      const defaultMode: SlotMode = hasGenProvider ? 'gen' : 'search'
       const initialSlots: ImageSlot[] = valid.map((r) => ({
         afterBlock: r.afterBlock,
         desc: r.desc,
         query: r.query,
         genPrompt: r.genPrompt || r.desc,
+        mode: defaultMode,
+        ratio: '16:9' as Ratio,
         images: [],
         selectedIndex: -1,
-        loading: true,
+        loading: false,
       }))
 
       setSlots(initialSlots)
-      setPhase('selecting')
-
-      await loadAllImages(initialSlots)
+      setPhase('planning')
     } catch (e: any) {
       if (e.message === 'PROVIDER_NOT_CONFIGURED') {
         setError('请先在设置中配置 AI 服务')
@@ -291,34 +311,75 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     }
   }
 
-  // ── Load images for all slots ──
+  // ── Slot mutations (planning phase) ──
 
-  const loadAllImages = async (currentSlots: ImageSlot[]) => {
-    for (const slot of currentSlots) {
+  const updateSlotMode = (afterBlock: number, mode: SlotMode) => {
+    setSlots((prev) => prev.map((s) => s.afterBlock === afterBlock ? { ...s, mode } : s))
+  }
+
+  const updateSlotRatio = (afterBlock: number, ratio: Ratio) => {
+    setSlots((prev) => prev.map((s) => s.afterBlock === afterBlock ? { ...s, ratio } : s))
+  }
+
+  const updateSlotGenPrompt = (afterBlock: number, genPrompt: string) => {
+    setSlots((prev) => prev.map((s) => s.afterBlock === afterBlock ? { ...s, genPrompt } : s))
+  }
+
+  const updateSlotQuery = (afterBlock: number, query: string) => {
+    setSlots((prev) => prev.map((s) => s.afterBlock === afterBlock ? { ...s, query } : s))
+  }
+
+  const removeSlot = (afterBlock: number) => {
+    setSlots((prev) => prev.filter((s) => s.afterBlock !== afterBlock))
+  }
+
+  // ── Phase 2: Start batch generation ──
+
+  const startBatchGeneration = async () => {
+    if (slots.length === 0) return
+    setPhase('generating')
+    setGeneratingProgress({ done: 0, total: slots.length })
+
+    const genSlots = slots.map((s) => ({ ...s, images: [], loading: true, selectedIndex: -1 }))
+    setSlots(genSlots)
+
+    for (let i = 0; i < genSlots.length; i++) {
+      const slot = genSlots[i]
       const images = await fetchImagesForSlot(slot)
       setSlots((prev) =>
         prev.map((s) =>
           s.afterBlock === slot.afterBlock ? { ...s, images, loading: false } : s
         )
       )
+      setGeneratingProgress({ done: i + 1, total: genSlots.length })
     }
+
+    setPhase('selecting')
   }
 
-  // ── Fetch images: generate if model selected, else search ──
+  // ── Fetch images ──
 
   const fetchImagesForSlot = async (slot: ImageSlot): Promise<string[]> => {
-    const genId = selectedGenIdRef.current
-    if (genId) {
+    if (slot.mode === 'gen' && selectedGenIdRef.current) {
       try {
-        const provider = genProvidersRef.current.find((p) => p.id === genId)
+        const provider = genProvidersRef.current.find((p) => p.id === selectedGenIdRef.current)
         if (!provider) return []
         const prompt = slot.genPrompt || `${slot.desc}，${slot.query}`
-        return await window.api.imageGenGenerate(genId, provider.apiBase, provider.modelId, prompt)
-      } catch {
+        const size = ratioSize(slot.ratio)
+        const bodyOverrides = {
+          size,
+          ...provider.bodyOverrides,
+        }
+        console.log('[AutoImageMatch] 生成图片:', { genId: provider.id, modelId: provider.modelId, ratio: slot.ratio, size, prompt: prompt.slice(0, 80) })
+        const images = await window.api.imageGenGenerate(provider.id, provider.apiBase, provider.modelId, prompt, bodyOverrides)
+        console.log('[AutoImageMatch] 生成结果:', images.length, '张')
+        return images
+      } catch (err) {
+        console.error('[AutoImageMatch] 生图失败:', err)
         return []
       }
     }
-    // 搜索模式
+
     try {
       const seed = Math.floor(Math.random() * 100)
       const res = await window.api.imageSuggestions(slot.query, seed)
@@ -328,7 +389,7 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     }
   }
 
-  // ── Re-fetch for a single slot ──
+  // ── Re-fetch for a single slot (selecting phase) ──
 
   const refreshSlot = async (afterBlock: number) => {
     setSlots((prev) =>
@@ -341,28 +402,6 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     if (!slot) return
 
     const images = await fetchImagesForSlot(slot)
-    setSlots((prev) =>
-      prev.map((s) =>
-        s.afterBlock === afterBlock ? { ...s, images, loading: false } : s
-      )
-    )
-  }
-
-  // ── Custom search (search mode only) ──
-
-  const searchCustomQuery = async (afterBlock: number, customQuery: string) => {
-    if (!customQuery.trim()) return
-
-    const updatedSlot = slots.find((s) => s.afterBlock === afterBlock)
-    if (!updatedSlot) return
-
-    const newSlot = { ...updatedSlot, query: customQuery.trim(), images: [], loading: true, selectedIndex: -1 }
-
-    setSlots((prev) =>
-      prev.map((s) => (s.afterBlock === afterBlock ? newSlot : s))
-    )
-
-    const images = await fetchImagesForSlot(newSlot)
     setSlots((prev) =>
       prev.map((s) =>
         s.afterBlock === afterBlock ? { ...s, images, loading: false } : s
@@ -414,6 +453,9 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
     if (phase === 'selecting' && selectedCount > 0) {
       if (!window.confirm('还有未确认的配图选择，确定关闭吗？')) return
     }
+    if (phase === 'planning' && slots.length > 0) {
+      if (!window.confirm('配图方案还未执行，确定关闭吗？')) return
+    }
     onClose()
   }
 
@@ -435,21 +477,31 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
                 {articleStyle}
               </span>
             )}
-            <div className="relative">
-              <select
-                className="h-7 rounded border border-border bg-background pl-2 pr-6 text-xs text-muted-foreground appearance-none cursor-pointer hover:border-primary/50 focus:outline-none focus:border-primary"
-                value={selectedGenId}
-                onChange={(e) => setSelectedGenId(e.target.value)}
-              >
-                <option value="">搜索图片</option>
-                {genProviders.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} 生图</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
-            </div>
+            {phase === 'planning' && (
+              <div className="relative">
+                <select
+                  className="h-7 rounded border border-border bg-background pl-2 pr-6 text-xs text-muted-foreground appearance-none cursor-pointer hover:border-primary/50 focus:outline-none focus:border-primary"
+                  value={selectedGenId}
+                  onChange={(e) => {
+                    const newId = e.target.value
+                    setSelectedGenId(newId)
+                    if (newId) {
+                      setSlots((prev) => prev.map((s) => ({ ...s, mode: 'gen' as SlotMode })))
+                    } else {
+                      setSlots((prev) => prev.map((s) => ({ ...s, mode: 'search' as SlotMode })))
+                    }
+                  }}
+                >
+                  <option value="">搜索图片</option>
+                  {genProviders.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} 生图</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
           </div>
-          {phase !== 'inserting' && (
+          {phase !== 'inserting' && phase !== 'generating' && (
             <button onClick={handleClose} className="rounded-md p-1 hover:bg-muted text-muted-foreground hover:text-foreground">✕</button>
           )}
         </div>
@@ -474,6 +526,15 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
             </div>
           )}
 
+          {phase === 'generating' && (
+            <div className="flex flex-col items-center gap-3 py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+              <p className="text-sm text-muted-foreground">
+                正在配图 {generatingProgress.done}/{generatingProgress.total}
+              </p>
+            </div>
+          )}
+
           {phase === 'done' && (
             <div className="flex flex-col items-center gap-3 py-8">
               <CheckCircle2 className="h-10 w-10 text-green-500" />
@@ -483,22 +544,97 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
             </div>
           )}
 
+          {/* ── Planning phase ── */}
+          {phase === 'planning' && slots.length > 0 && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                AI 已分析出 {slots.length} 个配图位置。你可以调整每张图的搜索词、生图提示词、比例，或切换搜索/生图模式。
+              </p>
+              {slots.map((slot, idx) => (
+                <div key={slot.afterBlock} className="rounded-lg border border-border p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">#{idx + 1}</span>
+                    <span className="text-sm font-medium">{slot.desc}</span>
+                    <div className="flex-1" />
+                    <button
+                      type="button"
+                      className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-red-500"
+                      onClick={() => removeSlot(slot.afterBlock)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Mode toggle */}
+                    <div className="flex rounded border border-border overflow-hidden text-[11px]">
+                      <button
+                        type="button"
+                        className={`px-2 py-1 flex items-center gap-1 ${slot.mode === 'search' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
+                        onClick={() => updateSlotMode(slot.afterBlock, 'search')}
+                      >
+                        <Search className="h-3 w-3" />搜索
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-2 py-1 flex items-center gap-1 ${slot.mode === 'gen' ? 'bg-purple-500 text-white' : 'bg-muted text-muted-foreground'} ${!hasGenProvider ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        onClick={() => { if (hasGenProvider) updateSlotMode(slot.afterBlock, 'gen') }}
+                        title={!hasGenProvider ? '请先在设置中配置生图服务商' : 'AI 生图'}
+                      >
+                        <Wand2 className="h-3 w-3" />生图
+                      </button>
+                    </div>
+
+                    {/* Ratio selector */}
+                    <select
+                      className="h-7 rounded border border-border bg-background px-2 text-[11px] text-muted-foreground"
+                      value={slot.ratio}
+                      onChange={(e) => updateSlotRatio(slot.afterBlock, e.target.value as Ratio)}
+                    >
+                      {RATIO_OPTIONS.map((r) => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Editable prompts */}
+                  <div className="space-y-1.5">
+                    {slot.mode === 'search' ? (
+                      <input
+                        className="w-full h-7 rounded border border-border bg-background px-2 text-xs"
+                        value={slot.query}
+                        onChange={(e) => updateSlotQuery(slot.afterBlock, e.target.value)}
+                        placeholder="搜索关键词"
+                      />
+                    ) : (
+                      <textarea
+                        className="w-full h-14 rounded border border-border bg-background px-2 py-1 text-xs resize-none"
+                        value={slot.genPrompt}
+                        onChange={(e) => updateSlotGenPrompt(slot.afterBlock, e.target.value)}
+                        placeholder="AI 生图提示词"
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Selecting phase (review & pick images) ── */}
           {(phase === 'selecting' || phase === 'inserting') && slots.length > 0 && (
             <div className="space-y-6">
               {slots.map((slot, idx) => (
                 <div key={slot.afterBlock}>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                      #{idx + 1}
+                    <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">#{idx + 1}</span>
+                    <span className="text-sm font-medium">{slot.desc}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {slot.mode === 'gen' ? (
+                        <span className="text-purple-500">{RATIO_OPTIONS.find(r => r.value === slot.ratio)?.label}</span>
+                      ) : (
+                        slot.query
+                      )}
                     </span>
-                    <h3 className="text-sm font-medium">{slot.desc}</h3>
-                    {selectedGenId ? (
-                      <span className="text-[10px] text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded max-w-[280px] truncate" title={slot.genPrompt}>
-                        {slot.genPrompt}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">({slot.query})</span>
-                    )}
                   </div>
 
                   {slot.loading ? (
@@ -528,7 +664,7 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
                               <img
                                 src={dataUrl}
                                 alt={`${slot.desc} ${i + 1}`}
-                                className="w-full aspect-[4/3] object-cover"
+                                className={`w-full object-cover ${slot.ratio === '16:9' ? 'aspect-video' : slot.ratio === '3:4' ? 'aspect-[3/4]' : 'aspect-square'}`}
                               />
                               {isSelected && (
                                 <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center">
@@ -549,22 +685,14 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
                           onClick={() => refreshSlot(slot.afterBlock)}
                         >
                           <RefreshCw className="h-3 w-3" />
-                          {selectedGenId ? '重新生成' : '换一批'}
+                          {slot.mode === 'gen' ? '重新生成' : '换一批'}
                         </button>
-                        {!selectedGenId && (
-                          <>
-                            <span className="text-xs text-muted-foreground">·</span>
-                            <CustomSearchInput
-                              onSearch={(q) => searchCustomQuery(slot.afterBlock, q)}
-                            />
-                          </>
-                        )}
                       </div>
                     </>
                   ) : (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
                       <AlertTriangle className="h-3 w-3" />
-                      {selectedGenId ? '生成失败' : '图片加载失败'}
+                      {slot.mode === 'gen' ? '生成失败' : '图片加载失败'}
                       <button
                         type="button"
                         className="text-purple-500 hover:underline"
@@ -581,6 +709,25 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
         </div>
 
         {/* Footer */}
+        {phase === 'planning' && slots.length > 0 && (
+          <div className="border-t border-border px-4 py-3 shrink-0 flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              共 {slots.length} 个配图位置
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleClose}>取消</Button>
+              <Button
+                size="sm"
+                className="gap-1.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+                onClick={startBatchGeneration}
+              >
+                <Play className="h-3.5 w-3.5" />
+                开始配图 ({slots.length})
+              </Button>
+            </div>
+          </div>
+        )}
+
         {phase === 'selecting' && slots.length > 0 && (
           <div className="border-t border-border px-4 py-3 shrink-0 flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
@@ -602,49 +749,6 @@ function AutoImageMatch({ editor, open, onClose }: AutoImageMatchProps): React.J
         )}
       </div>
     </div>
-  )
-}
-
-// ── Inline custom search input ──
-
-function CustomSearchInput({ onSearch }: { onSearch: (query: string) => void }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState('')
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-        onClick={() => setOpen(true)}
-      >
-        自定义搜索…
-      </button>
-    )
-  }
-
-  return (
-    <input
-      className="h-6 w-32 rounded border border-border bg-background px-1.5 text-xs"
-      placeholder="输入搜索词…"
-      value={value}
-      autoFocus
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && value.trim()) {
-          onSearch(value.trim())
-          setValue('')
-          setOpen(false)
-        }
-        if (e.key === 'Escape') {
-          setOpen(false)
-          setValue('')
-        }
-      }}
-      onBlur={() => {
-        if (!value.trim()) setOpen(false)
-      }}
-    />
   )
 }
 

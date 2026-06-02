@@ -205,6 +205,17 @@ function AISettings(): React.JSX.Element {
     setShowAddCustom(true)
   }
 
+  const handleEditPreset = (provider: AIProvider) => {
+    setEditingCustom(null)
+    setFormName(provider.config.name)
+    setFormApiBase(provider.config.apiBase)
+    setFormDefaultModel(provider.config.defaultModel)
+    setFormModels(provider.config.models.map((m) => `${m.id}|${m.name}`).join('\n'))
+    setFormDocsUrl(provider.config.docsUrl)
+    setFormDescription(provider.config.description || '')
+    setShowAddCustom(true)
+  }
+
   const resetCustomForm = () => {
     setShowAddCustom(false)
     setEditingCustom(null)
@@ -259,6 +270,14 @@ function AISettings(): React.JSX.Element {
                 <ExternalLink className="h-3 w-3" />
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-muted-foreground"
+              onClick={(e) => { e.stopPropagation(); handleEditPreset(provider) }}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
             {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
           </div>
         </div>
@@ -485,9 +504,9 @@ function AISettings(): React.JSX.Element {
       <Dialog open={showAddCustom} onOpenChange={(open) => { if (!open) resetCustomForm() }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingCustom ? '编辑服务商' : '添加自定义服务商'}</DialogTitle>
+            <DialogTitle>{editingCustom ? '编辑服务商' : '添加自定义服务商（预设修改时可直接保存为自定义服务商）'}</DialogTitle>
             <DialogDescription>
-              填写 API 地址和模型信息
+              填写 API 地址和模型信息。编辑预设会创建为新的自定义服务商。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

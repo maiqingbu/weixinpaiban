@@ -1,6 +1,6 @@
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
 import Image from '@tiptap/extension-image'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlignLeft, AlignRight, AlignCenter, Maximize2, GripVertical, Crop, Pencil } from 'lucide-react'
 
 // ── React component ──
@@ -12,10 +12,19 @@ function ResizableImageComponent({ node, updateAttributes, selected, editor }: a
     startX: number; startY: number; startW: number; startH: number; corner: string
   } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  // 跟踪全局事件监听器，确保组件卸载时清理
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   const floatVal = node.attrs.float || null
   const pixelW = node.attrs.width || null
   const pixelH = node.attrs.height || null
+
+  // 组件卸载时清理残留的全局事件监听器
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.()
+    }
+  }, [])
 
   const onImageLoad = useCallback(() => {
     if (imgRef.current) {
@@ -79,7 +88,20 @@ function ResizableImageComponent({ node, updateAttributes, selected, editor }: a
         document.removeEventListener('mouseup', onMouseUp)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
+        cleanupRef.current = null
       }
+
+      // 注册清理函数，确保组件卸载时移除监听器
+      const prevCleanup = cleanupRef.current
+      cleanupRef.current = () => {
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        resizeRef.current = null
+      }
+      // 先清理前一次未完成的 resize（极少发生，但做保护）
+      if (prevCleanup) prevCleanup()
 
       document.body.style.cursor = cornerToCursor(corner)
       document.body.style.userSelect = 'none'

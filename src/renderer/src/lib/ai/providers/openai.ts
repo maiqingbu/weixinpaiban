@@ -9,8 +9,9 @@ export const OpenAIProvider: AIProvider = {
     models: [
       { id: 'gpt-4o', name: 'GPT-4o（最强）', license: '商用许可' },
       { id: 'gpt-4o-mini', name: 'GPT-4o Mini（推荐）', license: '商用许可' },
+      { id: 'o3-mini', name: 'o3-mini（推理）', license: '商用许可' },
+      { id: 'o1', name: 'o1（深度推理）', license: '商用许可' },
       { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', license: '商用许可' },
-      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', license: '商用许可' },
     ],
     apiBase: 'https://api.openai.com/v1',
     docsUrl: 'https://platform.openai.com/api-keys',

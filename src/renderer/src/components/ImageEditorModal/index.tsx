@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { uploadManager, getUploader } from '@/lib/imageUpload'
+import { uploadManager, getProviderById } from '@/lib/imageUpload'
 import EditorCanvas from './Canvas'
 import ToolSidebar from './Toolbar'
 import LayersPanel from './LayersPanel'
@@ -43,7 +43,6 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   const isUndoRedoRef = useRef(false)
 
   const editorInstance = useAppStore((s) => s.editorInstance)
-  const configuredProviders = useAppStore((s) => s.configuredProviders)
 
   const canUndo = historyIndexRef.current > 0
   const canRedo = historyIndexRef.current < historyRef.current.length - 1
@@ -199,12 +198,12 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       const file = new File([blob], `edited-image-${Date.now()}.png`, { type: 'image/png' })
 
       let finalUrl: string = dataUrl
-      if (configuredProviders.length > 0) {
-        const providerId = configuredProviders[0].provider_id
-        const provider = getUploader(providerId)
+      const activeProviderId = await window.api?.imageHostGetSetting?.('active_provider')
+      if (activeProviderId) {
+        const provider = getProviderById(activeProviderId)
         if (provider) {
           try {
-            const config = (await window.api?.imageHostGetConfig(providerId)) || {}
+            const config = (await window.api?.imageHostGetConfig(activeProviderId)) || {}
             finalUrl = await uploadManager.upload(file, `edited-${Date.now()}`, (f) => provider.upload(f, f.name, config).then((r) => r.url))
           } catch { /* fallback to dataUrl */ }
         }
@@ -216,7 +215,7 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     } catch (err) {
       console.error('[ImageEditor] export failed:', err)
     }
-  }, [fabricRef, configuredProviders, replaceImageInEditor, onClose, editorInstance, imageUrl, imagePos])
+  }, [fabricRef, replaceImageInEditor, onClose, editorInstance, imageUrl, imagePos])
 
   // ── 替换图片 ──
   const handleReplace = useCallback(() => {

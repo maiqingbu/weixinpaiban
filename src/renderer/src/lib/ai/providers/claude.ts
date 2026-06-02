@@ -4,12 +4,12 @@ export const ClaudeProvider: AIProvider = {
   config: {
     id: 'claude',
     name: 'Claude (Anthropic)',
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: 'claude-sonnet-4-6',
     models: [
-      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4（最强）', license: '商用许可' },
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4（推荐）', license: '商用许可' },
-      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5（快速）', license: '商用许可' },
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', license: '商用许可' },
+      { id: 'claude-opus-4-7', name: 'Claude Opus 4.7（最强）', license: '商用许可' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6（推荐）', license: '商用许可' },
+      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5（快速）', license: '商用许可' },
+      { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', license: '商用许可' },
     ],
     apiBase: 'https://api.anthropic.com',
     docsUrl: 'https://console.anthropic.com/settings/keys',
@@ -89,7 +89,7 @@ export const ClaudeProvider: AIProvider = {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-4-5',
           max_tokens: 5,
           messages: [{ role: 'user', content: 'hi' }],
         }),

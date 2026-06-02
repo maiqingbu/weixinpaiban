@@ -32,7 +32,6 @@ mac:
     - target: dmg
       arch:
         - x64
-        - arm64
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:

@@ -5,12 +5,14 @@ export const SiliconFlowProvider: AIProvider = {
   config: {
     id: 'siliconflow',
     name: '硅基流动',
-    defaultModel: 'deepseek-ai/DeepSeek-V3',
+    defaultModel: 'deepseek-ai/DeepSeek-V3.2',
     models: [
-      { id: 'deepseek-ai/DeepSeek-V3', name: 'DeepSeek V3', license: 'MIT' },
-      { id: 'deepseek-ai/DeepSeek-R1', name: 'DeepSeek R1（推理）', license: 'MIT' },
-      { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen 2.5 72B', license: 'Apache 2.0' },
+      { id: 'deepseek-ai/DeepSeek-V3.2', name: 'DeepSeek V3.2（最新）', license: 'MIT' },
+      { id: 'deepseek-ai/DeepSeek-R1-0528', name: 'DeepSeek R1 0528（推理）', license: 'MIT' },
+      { id: 'deepseek-ai/DeepSeek-V3.1', name: 'DeepSeek V3.1', license: 'MIT' },
+      { id: 'Qwen/Qwen3-235B-A22B', name: 'Qwen3 235B', license: 'Apache 2.0' },
       { id: 'meta-llama/Llama-3.3-70B-Instruct', name: 'Llama 3.3 70B', license: 'Llama 许可' },
+      { id: 'deepseek-ai/DeepSeek-R1', name: 'DeepSeek R1（原版）', license: 'MIT' },
     ],
     apiBase: 'https://api.siliconflow.cn/v1',
     docsUrl: 'https://cloud.siliconflow.cn/account/ak',

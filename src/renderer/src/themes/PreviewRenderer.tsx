@@ -54,6 +54,34 @@ function generateThemeCSS(theme: Theme): string {
 `
 }
 
+function placeholderDiv(text: string): string {
+  return `<div style="display:flex;align-items:center;justify-content:center;height:180px;background:#f3f4f6;border:2px dashed #d1d5db;border-radius:8px;margin:16px 0;box-sizing:border-box;max-width:100%;"><span style="font-size:14px;color:#9ca3af;text-align:center;padding:0 24px;">🖼 ${text}</span></div>`
+}
+
+/**
+ * 替换占位符为稳定元素：
+ * 1. <!-- IMG:xxx --> 注释占位符
+ * 2. via.placeholder.com / placehold.co 外部占位图片（国内不可达）
+ */
+function replaceImagePlaceholders(html: string): string {
+  let result = html
+
+  result = result.replace(
+    /<!--\s*IMG:\s*(.*?)\s*-->/g,
+    (_match, desc: string) => placeholderDiv(desc.trim() || '配图占位')
+  )
+
+  result = result.replace(
+    /<img\b[^>]*\bsrc\s*=\s*"(https?:\/\/(?:via\.placeholder\.com|placehold\.co)[^"]*)"[^>]*>/gi,
+    (_m, src: string) => {
+      const text = decodeURIComponent(src.match(/text=([^&]*)/)?.[1] || '占位图片')
+      return placeholderDiv(text)
+    }
+  )
+
+  return result
+}
+
 function processTaskListCheckboxes(html: string): string {
   return html
     .replace(
@@ -153,7 +181,8 @@ interface PreviewRendererProps {
 function PreviewRenderer({ html, theme }: PreviewRendererProps): React.JSX.Element {
   const cleanHtml = useMemo(() => {
     const expanded = expandStyledBlocks(expandTemplateBlocks(html))
-    const sanitized = DOMPurify.sanitize(expanded, {
+    const withPlaceholders = replaceImagePlaceholders(expanded)
+    const sanitized = DOMPurify.sanitize(withPlaceholders, {
       ADD_ATTR: ['data-type', 'data-checked', 'class', 'data-template-id', 'data-material-id', 'data-editable', 'data-editable-img', 'data-html', 'data-styled-block', 'data-styled-html', 'data-rotation', 'contenteditable', 'style'],
       ADD_TAGS: ['span'],
     })

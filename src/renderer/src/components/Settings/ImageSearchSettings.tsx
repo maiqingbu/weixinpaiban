@@ -168,6 +168,19 @@ function ImageSearchSettings(): React.JSX.Element {
     setShowCustomForm(true)
   }
 
+  const handleEditPresetGen = (providerId: string) => {
+    const builtin = getImageGenProvider(providerId)
+    if (!builtin) return
+    setEditingCustom(null)
+    setFormName(builtin.name)
+    setFormApiBase(builtin.apiBase)
+    setFormDefaultModel(builtin.models[0]?.id || '')
+    setFormModels(builtin.models.map((m) => `${m.id}|${m.name}`).join('\n'))
+    setFormDocsUrl(builtin.docsUrl)
+    setFormDescription(builtin.description)
+    setShowCustomForm(true)
+  }
+
   const parsedModels = (() => {
     return formModels.split('\n').filter(Boolean).map((line) => {
       const [id, name] = line.split('|').map((s) => s.trim())
@@ -293,7 +306,7 @@ function ImageSearchSettings(): React.JSX.Element {
             {isCustom && <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-mono">{apiBase}</p>}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {isCustom && (
+            {isCustom ? (
               <>
                 <Button
                   variant="ghost"
@@ -312,6 +325,15 @@ function ImageSearchSettings(): React.JSX.Element {
                   <Trash2 className="h-3 w-3" />
                 </Button>
               </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); handleEditPresetGen(providerId) }}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
             )}
             {docsUrl && (
               <Button
@@ -461,9 +483,9 @@ function ImageSearchSettings(): React.JSX.Element {
       <Dialog open={showCustomForm} onOpenChange={(open) => { if (!open) resetCustomForm() }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingCustom ? '编辑自定义服务商' : '添加自定义服务商'}</DialogTitle>
+            <DialogTitle>{editingCustom ? '编辑自定义服务商' : '添加自定义服务商（预设修改时可直接保存为自定义服务商）'}</DialogTitle>
             <DialogDescription>
-              支持任何兼容 OpenAI /v1/images/generations 格式的生图 API
+              支持任何兼容 OpenAI /v1/images/generations 格式的生图 API。编辑预设会创建为新的自定义服务商。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

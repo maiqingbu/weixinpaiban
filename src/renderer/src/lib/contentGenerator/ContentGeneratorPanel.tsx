@@ -31,7 +31,7 @@ export function ContentGeneratorPanel({ onGenerate, onClose }: Props) {
   const [topic, setTopic] = useState('');
   const [keywords, setKeywords] = useState('');
   const [tone, setTone] = useState('professional');
-  const [length, setLength] = useState<'short' | 'medium' | 'long'>('medium');
+  const [length, setLength] = useState<'micro' | 'short' | 'medium' | 'long' | 'epic'>('medium');
   const [audience, setAudience] = useState('general');
   const [extras, setExtras] = useState({
     dataChart: false, ctaButton: false, quoteCard: false,
@@ -310,7 +310,7 @@ export function ContentGeneratorPanel({ onGenerate, onClose }: Props) {
                           <label style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>目标篇幅</label>
                           <select
                             value={length}
-                            onChange={e => setLength(e.target.value as 'short' | 'medium' | 'long')}
+                            onChange={e => setLength(e.target.value as typeof length)}
                             style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 14, outline: 'none', background: '#fff' }}
                           >
                             {LENGTH_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label} - {l.description}</option>)}

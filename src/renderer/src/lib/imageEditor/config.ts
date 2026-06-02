@@ -42,7 +42,7 @@ export const CROP_RATIOS: CropRatio[] = [
   { id: '16:9', name: '16:9', ratio: 16/9 },
   { id: '9:16', name: '9:16', ratio: 9/16 },
   { id: '2.35:1', name: '公众号封面', ratio: 2.35 },
-  { id: '2.35:1', name: '微信首图', ratio: 2.35/1 },
+  { id: 'wechat-hero', name: '微信首图', ratio: 2.35/1 },
 ]
 
 /** 文字预设 */

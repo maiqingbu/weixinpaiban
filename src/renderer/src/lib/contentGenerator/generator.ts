@@ -81,7 +81,7 @@ export function generateContent(opts: GenerateContentOptions): GenerateContentRe
     onStatus?.('正在生成内容…')
     const { system, user } = buildContentGenPrompt(config, searchContext);
 
-    const lengthTokenMap: Record<string, number> = { short: 4096, medium: 8192, long: 16384 };
+    const lengthTokenMap: Record<string, number> = { micro: 4096, short: 8192, medium: 16384, long: 32768, epic: 40960 };
     const maxTokens = (config.length ? lengthTokenMap[config.length] : undefined) || 8192;
 
     const aiComplete = createAIComplete();
