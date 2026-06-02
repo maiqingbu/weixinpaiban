@@ -78,7 +78,6 @@ function CustomThemeEditor({ open, onOpenChange }: CustomThemeEditorProps): Reac
 
   useEffect(() => {
     if (open) loadList()
-    ;(window as any).__refreshThemeList = loadList
   }, [open, loadList])
   useEffect(() => {
     const handler = () => loadList()
@@ -198,16 +197,29 @@ function CustomThemeEditor({ open, onOpenChange }: CustomThemeEditorProps): Reac
 
   const handleApply = useCallback((theme: CustomTheme) => {
     // Create a Theme object from custom CSS and apply it
+    // 用自定义主题自己的 base_theme_id 派生 styles，而不是强制 'original'，
+    // 否则基于"本草纲目"等模板创建的自定义主题应用后会变成 original 样式。
+    const baseId = theme.base_theme_id || 'original'
+    const baseTheme = getThemeById(baseId) ?? getThemeById('original')
     const customTheme: Theme = {
       id: theme.id,
       name: theme.name,
       description: '自定义主题',
-      styles: getThemeById('original').styles, // fallback styles
+      styles: baseTheme.styles,
       customCss: theme.css,
     }
     useAppStore.getState().setCurrentThemeId(theme.id)
     // Store custom theme in a way PreviewPane can find it
     ;(window as any).__customTheme = customTheme
+    // 显式通知 PreviewPane 重新拉一次列表，避免 race：customThemes state 还没刷新时
+    // 主题查找会回退到 (window as any).__customTheme，导致应用的是上一个 custom theme。
+    if (typeof (window as any).__refreshThemeList === 'function') {
+      try {
+        (window as any).__refreshThemeList()
+      } catch (err) {
+        console.warn('[CustomThemeEditor] refreshThemeList failed:', err)
+      }
+    }
     onOpenChange(false)
     toast({ title: '已应用主题' })
   }, [toast])

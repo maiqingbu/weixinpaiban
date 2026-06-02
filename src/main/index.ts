@@ -109,6 +109,26 @@ if (isDevMode) {
   })
 }
 
+app.setName('wx-typesetter')
+
+// userData 路径在 packaged 模式下依赖 app.getName()。
+// Windows packaged 模式 + 中文 productName + electron-builder 装配行为会导致
+// app.getName() 偶尔返回产品名（如 "微信排版工具"）而非 "wx-typesetter"，
+// 造成升级前后 SQLite 路径不同、用户数据（含 custom_themes）"丢失"。
+// 这里在 app.ready 之前显式锁死成 "wx-typesetter"，
+// 保证 dev/mac packaged/win packaged 三种模式路径一致。
+// 注意：app.setPath('userData') 必须在 ready 之前调用才有效。
+{
+  const expectedUserData = join(app.getPath('appData'), 'wx-typesetter')
+  if (app.getPath('userData') !== expectedUserData) {
+    try {
+      app.setPath('userData', expectedUserData)
+    } catch (err) {
+      console.warn('[main] Failed to override userData path:', err)
+    }
+  }
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
 

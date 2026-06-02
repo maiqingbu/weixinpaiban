@@ -4,6 +4,7 @@ import { ThemeProvider } from '@/themes/ThemeProvider'
 import { PreviewRenderer } from '@/themes/PreviewRenderer'
 import { themes, getThemeById } from '@/themes/presets'
 import { CustomThemeEditor } from '@/components/CustomThemeEditor'
+import { resolveAssetPath } from '@/lib/asset'
 import type { Theme } from '@/themes/types'
 
 /** 公众号文章实际渲染宽度 */
@@ -96,7 +97,7 @@ function ThemeSelector({
                 >
                   {t.previewImage ? (
                     <img
-                      src={t.previewImage}
+                      src={resolveAssetPath(t.previewImage)}
                       alt=""
                       className="h-8 w-8 shrink-0 rounded object-cover"
                     />
@@ -280,22 +281,51 @@ function PreviewPane(): React.JSX.Element {
   }, [safeContent, isEmpty])
 
   const loadCustomThemes = useCallback(() => {
-    window.api?.customThemeList?.().then((list) => {
-      if (!list) return
-      const originalTheme = getThemeById('original')
-      const mapped = list.map((ct) => ({
-        id: ct.id,
-        name: ct.name,
-        description: '自定义主题',
-        styles: originalTheme.styles,
-        customCss: ct.css,
-      }))
-      setCustomThemes(mapped)
-    })
+    const api = window.api
+    if (!api || typeof api.customThemeList !== 'function') {
+      // 没有 customThemeList IPC（极旧 preload 兼容）：直接当作空
+      setCustomThemes([])
+      return
+    }
+    // 用 promise chain 而非 async/await，让 catch 能吞掉 unhandled rejection
+    api
+      .customThemeList()
+      .then((list) => {
+        if (!list) {
+          setCustomThemes([])
+          return
+        }
+        const originalTheme = getThemeById('original')
+        const mapped = list.map((ct) => ({
+          id: ct.id,
+          name: ct.name,
+          description: '自定义主题',
+          styles: originalTheme.styles,
+          customCss: ct.css,
+        }))
+        setCustomThemes(mapped)
+      })
+      .catch((err) => {
+        // 之前是 silent fail，custom_themes 加载失败时直接清空，
+        // 用户看到"自定义主题没了"但没有任何线索。改成 console.warn + 保留旧值。
+        console.warn('[PreviewPane] Failed to load custom themes:', err)
+      })
   }, [])
 
   useEffect(() => {
     loadCustomThemes()
+  }, [loadCustomThemes])
+
+  // 把 loadCustomThemes 暴露到 window 上，让 CustomThemeEditor 在 apply/delete/save 时
+  // 主动触发 PreviewPane 刷新 customThemes state（避免 race condition：
+  // setCurrentThemeId 触发 theme 重算时 customThemes 还没更新）
+  useEffect(() => {
+    ;(window as any).__refreshThemeList = loadCustomThemes
+    return () => {
+      if ((window as any).__refreshThemeList === loadCustomThemes) {
+        ;(window as any).__refreshThemeList = undefined
+      }
+    }
   }, [loadCustomThemes])
 
   useEffect(() => {

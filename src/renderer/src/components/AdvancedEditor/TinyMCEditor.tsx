@@ -117,8 +117,27 @@ function TinyMCEditor({ initialContent, onChange }: AdvancedEditorProps): React.
         initialValue={initialContent || ''}
         licenseKey="gpl"
         init={{
-          base_url: new URL('/tinymce/', window.location.origin).href,
-          base_path: new URL('/tinymce/', window.location.origin).href,
+          // file:// 协议下（packaged 模式）window.location.origin 在 Chrome 中是 'null' 字符串，
+          // 用它构造 new URL('/tinymce/', 'null') 会抛错或解析成 file:///tinymce/（无盘符的根路径），
+          // 导致 TinyMCE 找不到插件/皮肤资源，编辑器空白。
+          // 改用 window.location.href 作为 base 解析相对路径，自动适配 dev/packaged/双端。
+          base_url: (() => {
+            try {
+              return new URL('./tinymce/', window.location.href).href
+            } catch {
+              // 兜底：去掉文件名后拼 tinymce/
+              const base = window.location.href.split('/').slice(0, -1).join('/') + '/'
+              return new URL('./tinymce/', base).href
+            }
+          })(),
+          base_path: (() => {
+            try {
+              return new URL('./tinymce/', window.location.href).href
+            } catch {
+              const base = window.location.href.split('/').slice(0, -1).join('/') + '/'
+              return new URL('./tinymce/', base).href
+            }
+          })(),
           suffix: '.min',
           height: '100%',
           width: '100%',
