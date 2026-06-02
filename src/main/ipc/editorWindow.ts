@@ -1,7 +1,11 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
-import { is } from '@electron-toolkit/utils'
 import { validateString } from '../lib/validation'
+
+// electron-vite dev 模式标记。@electron-toolkit/utils 的 is.dev 用 !app.isPackaged 判断，
+// 但在 macOS 上 node_modules/electron/dist/Electron.app 本身是 app bundle，
+// 导致 app.isPackaged 始终为 true、is.dev 始终为 false。
+const isDevMode = process.env.NODE_ENV_ELECTRON_VITE === 'development'
 
 const MAX_HTML_LENGTH = 50 * 1024 * 1024
 
@@ -53,14 +57,15 @@ export function registerEditorWindowHandlers(): void {
       pendingContent = null
     })
 
-    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    if (isDevMode && process.env['ELECTRON_RENDERER_URL']) {
       editorWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/editor.html`)
     } else {
       editorWindow.loadFile(join(__dirname, '../renderer/editor.html'))
     }
 
-    if (is.dev) {
-      editorWindow.webContents.openDevTools({ mode: 'bottom' })
+    if (isDevMode) {
+      // detach 模式让 DevTools 弹出独立窗口，避免在底部被忽略
+      editorWindow.webContents.openDevTools({ mode: 'detach', activate: true })
     }
   })
 

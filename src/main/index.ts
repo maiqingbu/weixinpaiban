@@ -1,8 +1,14 @@
 import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
 import { rm } from 'fs/promises'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+
+// electron-vite dev 模式标记。@electron-toolkit/utils 的 is.dev 用 !app.isPackaged 判断，
+// 但在 macOS 上 node_modules/electron/dist/Electron.app 本身是 app bundle，
+// 导致 app.isPackaged 始终为 true、is.dev 始终为 false，所有 DevTools/CSP hook 都不会跑。
+// 这里改用 electron-vite 自己注入的环境变量判断。
+const isDevMode = process.env.NODE_ENV_ELECTRON_VITE === 'development'
 import { registerIpcHandlers } from './ipc'
 import { registerImportHandlers } from './ipc/import'
 import { registerLinkCheckHandlers } from './ipc/linkCheck'
@@ -37,8 +43,9 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
-    if (is.dev) {
-      mainWindow.webContents.openDevTools({ mode: 'bottom' })
+    if (isDevMode) {
+      // 用 detach 模式让 DevTools 弹出独立窗口，避免在底部被忽略
+      mainWindow.webContents.openDevTools({ mode: 'detach', activate: true })
       // Right-click context menu for Inspect Element
       mainWindow.webContents.on('context-menu', (_e, props) => {
         Menu.buildFromTemplate([
@@ -59,18 +66,48 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (isDevMode && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
-if (is.dev) {
+if (isDevMode) {
     app.commandLine.appendSwitch('remote-debugging-port', '9222')
   }
 
 setupGlobalErrorHandlers()
+
+// Dev mode: 把所有 renderer 的 console-message 转发到主进程 stdout，
+// 这样在终端就能直接看到 renderer 的 console.log/warn/error，无需打开 DevTools。
+if (isDevMode) {
+  app.on('web-contents-created', (_e, contents) => {
+    contents.on('console-message', (...args: any[]) => {
+      // Electron 28+ 新签名：单参数 event 对象；旧签名：4 个位置参数
+      let level = 0
+      let message = ''
+      if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+        const ev = args[0] as { level?: string | number; message?: string; lineNumber?: number; sourceId?: string }
+        level = typeof ev.level === 'string'
+          ? ({ log: 0, warning: 1, error: 2, info: 3, debug: 0 }[ev.level] ?? 0)
+          : (ev.level ?? 0)
+        message = ev.message ?? JSON.stringify(ev)
+      } else {
+        // 旧签名: (event, level, message, line, sourceId)
+        level = args[1] as number
+        message = args[2] as string
+      }
+      const tag = ['log', 'warn', 'error', 'info'][level] || 'log'
+      const prefix = `[renderer:${contents.id}] ${tag}:`
+      if (level >= 2) {
+        console.error(prefix, message)
+      } else {
+        console.log(prefix, message)
+      }
+    })
+  })
+}
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
