@@ -1,5 +1,15 @@
 import { safeStorage, ipcMain, shell } from 'electron'
 import { getDb } from '../db'
+import {
+  validateString,
+  validateAIInput,
+  validateEnum,
+  validateArray,
+  validateObject,
+  validateNumber,
+  ValidationError
+} from '../lib/validation'
+import { isSafeExternalUrl } from '../lib/urlSafety'
 
 // Active requests for cancellation
 const activeRequests = new Map<string, AbortController>()
@@ -194,30 +204,36 @@ async function parseClaudeStream(
 export function registerAiHandlers(): void {
   // ── AI Key CRUD ──
 
-  ipcMain.handle('ai:save-key', async (_event, providerId: string, apiKey: string, modelId: string) => {
+  ipcMain.handle('ai:save-key', async (_event, providerId: unknown, apiKey: unknown, modelId: unknown) => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
+    const safeApiKey = validateString(apiKey, 'apiKey', { minLength: 1, maxLength: 1024 })
+    const safeModelId = validateString(modelId, 'modelId', { minLength: 1, maxLength: 200 })
+
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error('当前系统不支持安全加密存储')
     }
-    const encrypted = safeStorage.encryptString(apiKey)
+    const encrypted = safeStorage.encryptString(safeApiKey)
     const db = getDb()
     db.prepare(`
       INSERT INTO ai_keys (provider_id, encrypted_key, model_id) VALUES (?, ?, ?)
       ON CONFLICT(provider_id) DO UPDATE SET encrypted_key = excluded.encrypted_key, model_id = excluded.model_id
-    `).run(providerId, encrypted, modelId)
+    `).run(safeProviderId, encrypted, safeModelId)
     return { success: true }
   })
 
-  ipcMain.handle('ai:get-key', async (_event, providerId: string) => {
+  ipcMain.handle('ai:get-key', async (_event, providerId: unknown) => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
     const row = getDb()
       .prepare('SELECT encrypted_key, model_id FROM ai_keys WHERE provider_id = ?')
-      .get(providerId) as { encrypted_key: Buffer; model_id: string } | undefined
+      .get(safeProviderId) as { encrypted_key: Buffer; model_id: string } | undefined
     if (!row) return null
     const apiKey = safeStorage.decryptString(row.encrypted_key)
     return { apiKey, modelId: row.model_id }
   })
 
-  ipcMain.handle('ai:delete-key', async (_event, providerId: string) => {
-    getDb().prepare('DELETE FROM ai_keys WHERE provider_id = ?').run(providerId)
+  ipcMain.handle('ai:delete-key', async (_event, providerId: unknown) => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
+    getDb().prepare('DELETE FROM ai_keys WHERE provider_id = ?').run(safeProviderId)
     return { success: true }
   })
 
@@ -234,19 +250,29 @@ export function registerAiHandlers(): void {
     return getDb().prepare('SELECT * FROM custom_providers ORDER BY created_at DESC').all()
   })
 
-  ipcMain.handle('ai:custom-save', async (_event, provider: {
-    id?: string
-    name: string
-    apiBase: string
-    defaultModel: string
-    models: Array<{ id: string; name: string }>
-    docsUrl?: string
-    keyHint?: string
-    description?: string
-  }) => {
+  ipcMain.handle('ai:custom-save', async (_event, provider: unknown) => {
+    const obj = validateObject<Record<string, unknown>>(provider, 'provider')
+    const id = obj.id ? validateString(obj.id, 'id', { minLength: 1, maxLength: 100 }) : `custom-${Date.now()}`
+    const name = validateString(obj.name, 'name', { minLength: 1, maxLength: 200 })
+    const apiBase = validateString(obj.apiBase, 'apiBase', { minLength: 1, maxLength: 500 })
+    const defaultModel = validateString(obj.defaultModel, 'defaultModel', { minLength: 1, maxLength: 200 })
+    const models = validateArray(obj.models, 'models', {
+      minLength: 0,
+      maxLength: 100,
+      itemValidator: (item, idx) => {
+        const m = validateObject<Record<string, unknown>>(item, `models[${idx}]`)
+        return {
+          id: validateString(m.id, `models[${idx}].id`, { minLength: 1, maxLength: 200 }),
+          name: validateString(m.name, `models[${idx}].name`, { minLength: 1, maxLength: 200 })
+        }
+      }
+    })
+    const docsUrl = obj.docsUrl ? validateString(obj.docsUrl, 'docsUrl', { allowEmpty: true, maxLength: 500 }) : ''
+    const keyHint = obj.keyHint ? validateString(obj.keyHint, 'keyHint', { allowEmpty: true, maxLength: 200 }) : 'API Key'
+    const description = obj.description ? validateString(obj.description, 'description', { allowEmpty: true, maxLength: 1000 }) : ''
+
+    const modelsJson = JSON.stringify(models)
     const db = getDb()
-    const id = provider.id || `custom-${Date.now()}`
-    const modelsJson = JSON.stringify(provider.models)
     db.prepare(`
       INSERT INTO custom_providers (id, name, api_base, default_model, models_json, docs_url, key_hint, description)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -254,101 +280,127 @@ export function registerAiHandlers(): void {
         name = excluded.name, api_base = excluded.api_base, default_model = excluded.default_model,
         models_json = excluded.models_json, docs_url = excluded.docs_url, key_hint = excluded.key_hint,
         description = excluded.description
-    `).run(id, provider.name, provider.apiBase, provider.defaultModel, modelsJson, provider.docsUrl || '', provider.keyHint || 'API Key', provider.description || '')
+    `).run(id, name, apiBase, defaultModel, modelsJson, docsUrl, keyHint, description)
     return { id }
   })
 
-  ipcMain.handle('ai:custom-delete', async (_event, providerId: string) => {
-    getDb().prepare('DELETE FROM custom_providers WHERE id = ?').run(providerId)
-    getDb().prepare('DELETE FROM ai_keys WHERE provider_id = ?').run(providerId)
+  ipcMain.handle('ai:custom-delete', async (_event, providerId: unknown) => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
+    getDb().prepare('DELETE FROM custom_providers WHERE id = ?').run(safeProviderId)
+    getDb().prepare('DELETE FROM ai_keys WHERE provider_id = ?').run(safeProviderId)
     return { success: true }
   })
 
   // ── AI Completion (streaming) ──
 
-  ipcMain.handle('ai:complete', async (event, providerId: string, requestId: string, opts: any) => {
+  ipcMain.handle('ai:complete', async (event, providerId: unknown, requestId: unknown, opts: unknown) => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
+    const safeRequestId = validateString(requestId, 'requestId', { minLength: 1, maxLength: 100 })
+    const input = validateAIInput(opts, 'opts')
+
     const keyData = getDb()
       .prepare('SELECT encrypted_key, model_id FROM ai_keys WHERE provider_id = ?')
-      .get(providerId) as { encrypted_key: Buffer; model_id: string } | undefined
+      .get(safeProviderId) as { encrypted_key: Buffer; model_id: string } | undefined
 
     if (!keyData) {
-      event.sender.send('ai:error', { requestId, error: 'PROVIDER_NOT_CONFIGURED' })
-      return { requestId }
+      event.sender.send('ai:error', { requestId: safeRequestId, error: 'PROVIDER_NOT_CONFIGURED' })
+      return { requestId: safeRequestId }
     }
 
     const apiKey = safeStorage.decryptString(keyData.encrypted_key)
-    const model = opts.model || keyData.model_id || getDefaultModelForProvider(providerId)
-    const apiBase = getApiBaseForProvider(providerId)
+    const model = (input as any).model || keyData.model_id || getDefaultModelForProvider(safeProviderId)
+    const apiBase = getApiBaseForProvider(safeProviderId)
 
     if (!apiBase) {
-      event.sender.send('ai:error', { requestId, error: `未知的 AI 服务商: ${providerId}` })
-      return { requestId }
+      event.sender.send('ai:error', { requestId: safeRequestId, error: `未知的 AI 服务商: ${safeProviderId}` })
+      return { requestId: safeRequestId }
     }
 
     const controller = new AbortController()
-    activeRequests.set(requestId, controller)
+    activeRequests.set(safeRequestId, controller)
 
     ;(async () => {
       try {
-        const isClaude = CLAUDE_API_PROVIDERS.has(providerId)
+        const isClaude = CLAUDE_API_PROVIDERS.has(safeProviderId)
         const response = isClaude
-          ? await claudeRequest(apiKey, model, opts, controller.signal)
-          : await openAIRequest(apiBase, apiKey, model, opts, controller.signal)
+          ? await claudeRequest(apiKey, model, input, controller.signal)
+          : await openAIRequest(apiBase, apiKey, model, input, controller.signal)
 
         if (!response.ok) {
           const error = await response.text()
-          event.sender.send('ai:error', { requestId, error: `请求失败 (${response.status}): ${error.slice(0, 300)}` })
+          event.sender.send('ai:error', { requestId: safeRequestId, error: `请求失败 (${response.status}): ${error.slice(0, 300)}` })
           return
         }
 
-        if (!opts.stream) {
+        if (!input.stream) {
           const data = await response.json()
           const text = isClaude ? (data.content[0]?.text || '') : (data.choices[0].message.content)
-          event.sender.send('ai:done', { requestId, fullText: text })
+          event.sender.send('ai:done', { requestId: safeRequestId, fullText: text })
           return
         }
 
         const reader = response.body!.getReader()
-        const sendChunk = (text: string) => event.sender.send('ai:chunk', { requestId, text })
+        const sendChunk = (text: string) => event.sender.send('ai:chunk', { requestId: safeRequestId, text })
         const fullText = isClaude
           ? await parseClaudeStream(reader, sendChunk)
           : await parseOpenAIStream(reader, sendChunk)
 
-        event.sender.send('ai:done', { requestId, fullText })
+        event.sender.send('ai:done', { requestId: safeRequestId, fullText })
       } catch (e: unknown) {
         const err = e as Error
         if (err.name !== 'AbortError') {
-          event.sender.send('ai:error', { requestId, error: err.message || '请求失败' })
+          event.sender.send('ai:error', { requestId: safeRequestId, error: err.message || '请求失败' })
         } else {
-          event.sender.send('ai:error', { requestId, error: 'ABORTED' })
+          event.sender.send('ai:error', { requestId: safeRequestId, error: 'ABORTED' })
         }
       } finally {
-        activeRequests.delete(requestId)
+        activeRequests.delete(safeRequestId)
       }
     })()
 
-    return { requestId }
+    return { requestId: safeRequestId }
   })
 
   // ── AI Completion (simple, non-streaming) ──
 
-  ipcMain.handle('ai:complete-simple', async (_event, providerId: string, opts: { messages: Array<{ role: string; content: string }>; temperature?: number; maxTokens?: number }) => {
+  ipcMain.handle('ai:complete-simple', async (_event, providerId: unknown, opts: unknown) => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
+    const input = validateObject<Record<string, unknown>>(opts, 'opts')
+
+    const messages = validateArray(input.messages, 'messages', {
+      minLength: 1,
+      maxLength: 200,
+      itemValidator: (item, idx) => {
+        const msg = validateObject<Record<string, unknown>>(item, `messages[${idx}]`)
+        return {
+          role: validateEnum(msg.role, ['system', 'user', 'assistant'], `messages[${idx}].role`),
+          content: validateString(msg.content, `messages[${idx}].content`, { maxLength: 100 * 1024 })
+        }
+      }
+    })
+    const temperature = input.temperature !== undefined
+      ? validateNumber(input.temperature, 'temperature', { min: 0, max: 2 })
+      : undefined
+    const maxTokens = input.maxTokens !== undefined
+      ? validateNumber(input.maxTokens, 'maxTokens', { min: 1, max: 32000, integer: true })
+      : undefined
+
     const keyData = getDb()
       .prepare('SELECT encrypted_key, model_id FROM ai_keys WHERE provider_id = ?')
-      .get(providerId) as { encrypted_key: Buffer; model_id: string } | undefined
+      .get(safeProviderId) as { encrypted_key: Buffer; model_id: string } | undefined
 
     if (!keyData) throw new Error('PROVIDER_NOT_CONFIGURED')
 
     const apiKey = safeStorage.decryptString(keyData.encrypted_key)
-    const model = keyData.model_id || getDefaultModelForProvider(providerId)
-    const apiBase = getApiBaseForProvider(providerId)
+    const model = keyData.model_id || getDefaultModelForProvider(safeProviderId)
+    const apiBase = getApiBaseForProvider(safeProviderId)
 
-    if (!apiBase) throw new Error(`未知的 AI 服务商: ${providerId}`)
+    if (!apiBase) throw new Error(`未知的 AI 服务商: ${safeProviderId}`)
 
-    const isClaude = CLAUDE_API_PROVIDERS.has(providerId)
+    const isClaude = CLAUDE_API_PROVIDERS.has(safeProviderId)
     const response = isClaude
-      ? await claudeRequest(apiKey, model, { ...opts, stream: false })
-      : await openAIRequest(apiBase, apiKey, model, { ...opts, stream: false })
+      ? await claudeRequest(apiKey, model, { messages, temperature, maxTokens, stream: false })
+      : await openAIRequest(apiBase, apiKey, model, { messages, temperature, maxTokens, stream: false })
 
     if (!response.ok) {
       const errText = await response.text()
@@ -363,35 +415,42 @@ export function registerAiHandlers(): void {
     return { text, _raw: JSON.stringify(data).slice(0, 500) }
   })
 
-  ipcMain.handle('ai:cancel', async (_event, requestId: string) => {
-    const controller = activeRequests.get(requestId)
+  ipcMain.handle('ai:cancel', async (_event, requestId: unknown) => {
+    const safeRequestId = validateString(requestId, 'requestId', { minLength: 1, maxLength: 100 })
+    const controller = activeRequests.get(safeRequestId)
     if (controller) {
       controller.abort()
-      activeRequests.delete(requestId)
+      activeRequests.delete(safeRequestId)
     }
     return { success: true }
   })
 
-  ipcMain.handle('ai:open-external', async (_event, url: string) => {
-    shell.openExternal(url)
+  ipcMain.handle('ai:open-external', async (_event, url: unknown) => {
+    const safeUrl = validateString(url, 'url', { minLength: 1, maxLength: 2000 })
+    if (!isSafeExternalUrl(safeUrl)) {
+      throw new ValidationError('URL is not allowed (must be public http/https)', 'url')
+    }
+    shell.openExternal(safeUrl)
   })
 
   // ── Test connection ──
 
-  ipcMain.handle('ai:test-connection', async (_event, providerId: string, apiKey: string) => {
-    const apiBase = getApiBaseForProvider(providerId)
-    const model = getDefaultModelForProvider(providerId)
-    if (!apiBase) return { ok: false, error: `未知的 AI 服务商: ${providerId}` }
+  ipcMain.handle('ai:test-connection', async (_event, providerId: unknown, apiKey: unknown): Promise<{ ok: boolean; error?: string }> => {
+    const safeProviderId = validateString(providerId, 'providerId', { minLength: 1, maxLength: 100 })
+    const safeApiKey = validateString(apiKey, 'apiKey', { minLength: 1, maxLength: 1024 })
+    const apiBase = getApiBaseForProvider(safeProviderId)
+    const model = getDefaultModelForProvider(safeProviderId)
+    if (!apiBase) return { ok: false, error: `未知的 AI 服务商: ${safeProviderId}` }
 
     try {
-      const isClaude = CLAUDE_API_PROVIDERS.has(providerId)
+      const isClaude = CLAUDE_API_PROVIDERS.has(safeProviderId)
       const response = isClaude
-        ? await claudeRequest(apiKey, 'claude-haiku-4-5-20251001', {
+        ? await claudeRequest(safeApiKey, 'claude-haiku-4-5-20251001', {
             messages: [{ role: 'user', content: 'hi' }],
             maxTokens: 5,
             stream: false,
           })
-        : await openAIRequest(apiBase, apiKey, model, {
+        : await openAIRequest(apiBase, safeApiKey, model, {
             messages: [{ role: 'user', content: 'hi' }],
             maxTokens: 5,
             stream: false,

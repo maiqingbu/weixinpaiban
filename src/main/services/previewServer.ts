@@ -1,16 +1,15 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http'
-import { getDb } from '../db'
+import { randomBytes } from 'crypto'
+import { sanitizeHtmlForWeChat } from '../lib/sanitize'
 
 let server: Server | null = null
 let serverPort = 0
+let serverToken = ''
+let currentContent = ''
+let currentTitle = '预览'
 
-function generateId(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  let result = ''
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return result
+function generateToken(): string {
+  return randomBytes(24).toString('hex')
 }
 
 function escapeHtml(text: string): string {
@@ -50,85 +49,93 @@ function buildFullHtml(html: string, title: string): string {
 </html>`
 }
 
-function handleRequest(req: IncomingMessage, res: ServerResponse): void {
-  // Only handle /p/{id} routes
-  const urlPath = req.url || '/'
-  const match = urlPath.match(/^\/p\/([A-Za-z0-9]+)(\?|$)/)
+function authenticate(req: IncomingMessage): boolean {
+  if (!serverToken) return false
+  const authHeader = req.headers['authorization']
+  if (authHeader === `Bearer ${serverToken}`) return true
+  const urlObj = new URL(req.url || '/', 'http://localhost')
+  const queryToken = urlObj.searchParams.get('token')
+  return queryToken === serverToken
+}
 
+function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+  const urlObj = new URL(req.url || '/', 'http://localhost')
+  const urlPath = urlObj.pathname
+
+  if (urlPath === '/' || urlPath === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' })
+    res.end('OK')
+    return
+  }
+
+  const match = urlPath.match(/^\/preview(\/|$)/)
   if (!match) {
     res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end('<h1>404 - 页面不存在</h1>')
     return
   }
 
-  const id = match[1]
-  const db = getDb()
-  const row = db.prepare('SELECT html, title FROM previews WHERE id = ?').get(id) as { html: string; title: string } | undefined
-
-  if (!row) {
-    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end('<h1>预览不存在或已过期</h1>')
+  if (!authenticate(req)) {
+    res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end('<h1>401 - Unauthorized</h1>')
     return
   }
 
+  const sanitized = sanitizeHtmlForWeChat(currentContent)
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-  res.end(buildFullHtml(row.html, row.title))
+  res.end(buildFullHtml(sanitized, currentTitle))
 }
 
-export function startPreviewServer(): void {
-  if (server) return
+export async function startPreviewServer(): Promise<{ port: number; token: string }> {
+  if (server) {
+    return { port: serverPort, token: serverToken }
+  }
 
-  server = createServer(handleRequest)
-  server.listen(0, '127.0.0.1', () => {
-    const addr = server?.address()
-    if (addr && typeof addr === 'object') {
-      serverPort = addr.port
-      console.log(`[preview-server] listening on http://127.0.0.1:${serverPort}`)
-    }
+  serverToken = generateToken()
+
+  return new Promise((resolve, reject) => {
+    server = createServer(handleRequest)
+    server.on('error', (err) => {
+      console.error('[preview-server] error:', err)
+      server = null
+      reject(err)
+    })
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server?.address()
+      if (addr && typeof addr === 'object') {
+        serverPort = addr.port
+        console.log(`[preview-server] listening on http://127.0.0.1:${serverPort}`)
+        resolve({ port: serverPort, token: serverToken })
+      } else {
+        reject(new Error('Failed to get server address'))
+      }
+    })
   })
 }
 
-export function getServerPort(): number {
-  return serverPort
+export function updatePreviewContent(html: string, title?: string): void {
+  currentContent = html
+  if (title) currentTitle = title
 }
 
-export function createPreview(html: string, title: string): { id: string; url: string } {
-  const id = generateId()
-  const db = getDb()
-
-  // Enforce max 50 previews
-  const count = (db.prepare('SELECT COUNT(*) as cnt FROM previews').get() as { cnt: number }).cnt
-  if (count >= 50) {
-    db.prepare('DELETE FROM previews WHERE id IN (SELECT id FROM previews ORDER BY created_at ASC LIMIT 1)').run()
-  }
-
-  db.prepare('INSERT INTO previews (id, html, title, created_at) VALUES (?, ?, ?, unixepoch())').run(id, html, title)
-
-  return {
-    id,
-    url: `http://127.0.0.1:${serverPort}/p/${id}`,
-  }
+export function getPreviewToken(): string {
+  return serverToken
 }
 
-export function listPreviews(): Array<{ id: string; title: string; created_at: number; url: string }> {
-  const db = getDb()
-  const rows = db.prepare('SELECT id, title, created_at FROM previews ORDER BY created_at DESC LIMIT 50').all() as Array<{ id: string; title: string; created_at: number }>
-  return rows.map((r) => ({
-    ...r,
-    url: `http://127.0.0.1:${serverPort}/p/${r.id}`,
-  }))
+export function getPreviewUrl(): string {
+  if (!serverToken || !serverPort) return ''
+  return `http://127.0.0.1:${serverPort}/preview?token=${serverToken}`
 }
 
-export function deletePreview(id: string): boolean {
-  const db = getDb()
-  const result = db.prepare('DELETE FROM previews WHERE id = ?').run(id)
-  return result.changes > 0
-}
-
-export function stopPreviewServer(): void {
+export async function stopPreviewServer(): Promise<void> {
   if (server) {
-    server.close()
-    server = null
-    serverPort = 0
+    return new Promise((resolve) => {
+      server!.close(() => {
+        server = null
+        serverPort = 0
+        serverToken = ''
+        resolve()
+      })
+    })
   }
 }

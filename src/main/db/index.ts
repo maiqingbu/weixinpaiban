@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
+import { runMigrations } from './migrations'
 
 let db: Database.Database | null = null
 
@@ -27,213 +28,60 @@ export function getDb(): Database.Database {
 
   // Enable WAL mode for better performance
   db.pragma('journal_mode = WAL')
+  db.pragma('foreign_keys = ON')
+  db.pragma('synchronous = NORMAL')
 
-  // Run migrations
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS articles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      theme_id TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
+  // Run schema migrations (idempotent, ordered)
+  const migrationResult = runMigrations(db)
+  if (migrationResult.applied.length > 0) {
+    console.log(`[db] Applied migrations: ${migrationResult.applied.join(', ')}`)
+  }
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS previews (
-      id TEXT PRIMARY KEY,
-      html TEXT NOT NULL,
-      title TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS ai_keys (
-      provider_id TEXT PRIMARY KEY,
-      encrypted_key BLOB NOT NULL,
-      model_id TEXT NOT NULL DEFAULT ''
-    )
-  `)
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS saved_styles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      styles TEXT NOT NULL,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS article_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      article_id INTEGER NOT NULL,
-      content TEXT NOT NULL,
-      word_count INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
-    )
-  `)
-
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_article ON article_snapshots(article_id, created_at DESC)`)
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS custom_themes (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      css TEXT NOT NULL,
-      base_theme_id TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS image_host_configs (
-      provider_id TEXT PRIMARY KEY,
-      encrypted_config BLOB NOT NULL,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS image_host_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `)
-
-  // ── Custom Materials ──
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS custom_materials (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      keywords TEXT,
-      thumbnail TEXT NOT NULL,
-      html TEXT NOT NULL,
-      group_id TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      use_count INTEGER DEFAULT 0
-    )
-  `)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS custom_material_groups (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      sort_order INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL
-    )
-  `)
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_custom_materials_group ON custom_materials(group_id)`)
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_custom_materials_use ON custom_materials(use_count DESC)`)
-
-  // ── Read More Links ──
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS read_more_links (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      url TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      is_default INTEGER DEFAULT 0,
-      use_count INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `)
-
-  // ── Custom AI Providers ──
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS custom_providers (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      api_base TEXT NOT NULL,
-      default_model TEXT NOT NULL DEFAULT '',
-      models_json TEXT NOT NULL DEFAULT '[]',
-      docs_url TEXT DEFAULT '',
-      key_hint TEXT DEFAULT 'API Key',
-      description TEXT DEFAULT '',
-      created_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
-
-  // ── Migrations for v0.6.0 ──
-  try { db.exec('ALTER TABLE articles ADD COLUMN summary TEXT DEFAULT \'\'') } catch {}
-  try { db.exec('ALTER TABLE articles ADD COLUMN cover_image TEXT DEFAULT \'\'') } catch {}
-  try { db.exec('ALTER TABLE articles ADD COLUMN last_opened_at INTEGER DEFAULT 0') } catch {}
-
-  // ── Migrations for v0.7.0 ──
-  try { db.exec('ALTER TABLE articles ADD COLUMN read_more_url TEXT DEFAULT \'\'') } catch {}
-  try { db.exec('ALTER TABLE articles ADD COLUMN read_more_text TEXT DEFAULT \'阅读原文\'') } catch {}
-
-  // ── Migrations for v0.8.0 (独立高级编辑器内容) ──
-  try { db.exec('ALTER TABLE articles ADD COLUMN advanced_content TEXT DEFAULT \'\'') } catch {}
-
-  // ── Image Generation API Keys ──
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS image_gen_keys (
-      provider_id TEXT PRIMARY KEY,
-      api_key BLOB NOT NULL,
-      model_id TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
-
-  // Migration: encrypt existing plain-text image_gen_keys
-  try {
-    const database = db
-    const cols = database.prepare("PRAGMA table_info('image_gen_keys')").all() as Array<{ name: string; type: string }>
-    const apiKeyCol = cols.find((c) => c.name === 'api_key')
-    if (apiKeyCol && apiKeyCol.type.toUpperCase() === 'TEXT') {
-      const { safeStorage } = require('electron')
-      if (safeStorage.isEncryptionAvailable()) {
-        const rows = database.prepare('SELECT provider_id, api_key FROM image_gen_keys').all() as Array<{ provider_id: string; api_key: string }>
-        const encrypt = database.transaction(() => {
-          database.exec(`
-            CREATE TABLE IF NOT EXISTS image_gen_keys_new (
-              provider_id TEXT PRIMARY KEY,
-              api_key BLOB NOT NULL,
-              model_id TEXT NOT NULL DEFAULT '',
-              created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-              updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )
-          `)
-          for (const row of rows) {
-            try {
-              const encrypted = safeStorage.encryptString(row.api_key)
-              database.prepare('INSERT INTO image_gen_keys_new (provider_id, api_key, model_id, created_at, updated_at) SELECT provider_id, ?, model_id, created_at, updated_at FROM image_gen_keys WHERE provider_id = ?')
-                .run(encrypted, row.provider_id)
-            } catch {
-              // safeStorage unavailable for this key, skip
-            }
-          }
-          database.exec('DROP TABLE image_gen_keys')
-          database.exec('ALTER TABLE image_gen_keys_new RENAME TO image_gen_keys')
-        })
-        encrypt()
-      }
-    }
-  } catch { /* table may not exist yet, or already migrated */ }
-
-  // ── Custom Image Generation Providers ──
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS custom_image_gen_providers (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      api_base TEXT NOT NULL,
-      default_model TEXT NOT NULL DEFAULT '',
-      models_json TEXT NOT NULL DEFAULT '[]',
-      docs_url TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      created_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `)
+  // Backfill encryption for legacy plain-text image_gen_keys (one-time)
+  migrateImageGenKeysToEncrypted(db)
 
   return db
+}
+
+function migrateImageGenKeysToEncrypted(db: Database.Database): void {
+  try {
+    const cols = db.prepare("PRAGMA table_info('image_gen_keys')").all() as Array<{ name: string; type: string }>
+    const apiKeyCol = cols.find((c) => c.name === 'api_key')
+    if (!apiKeyCol || apiKeyCol.type.toUpperCase() !== 'TEXT') return
+
+    const { safeStorage } = require('electron')
+    if (!safeStorage.isEncryptionAvailable()) return
+
+    const rows = db.prepare('SELECT provider_id, api_key FROM image_gen_keys').all() as Array<{ provider_id: string; api_key: string }>
+    if (rows.length === 0) return
+
+    const tx = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS image_gen_keys_new (
+          provider_id TEXT PRIMARY KEY,
+          api_key BLOB NOT NULL,
+          model_id TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `)
+      for (const row of rows) {
+        try {
+          const encrypted = safeStorage.encryptString(row.api_key)
+          db.prepare('INSERT INTO image_gen_keys_new (provider_id, api_key, model_id, created_at, updated_at) SELECT provider_id, ?, model_id, created_at, updated_at FROM image_gen_keys WHERE provider_id = ?')
+            .run(encrypted, row.provider_id)
+        } catch {
+          console.warn(`[db] Failed to encrypt provider ${row.provider_id}, skipping`)
+        }
+      }
+      db.exec('DROP TABLE image_gen_keys')
+      db.exec('ALTER TABLE image_gen_keys_new RENAME TO image_gen_keys')
+    })
+    tx()
+    console.log(`[db] Migrated ${rows.length} image_gen_keys to encrypted format`)
+  } catch (err) {
+    console.error('[db] image_gen_keys migration failed:', err)
+  }
 }
 
 function articleColumns(): string {

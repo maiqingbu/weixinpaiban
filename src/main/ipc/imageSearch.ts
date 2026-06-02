@@ -1,5 +1,6 @@
 import { ipcMain, shell, BrowserWindow } from 'electron'
 import { getDb } from '../db'
+import { validateString, validateNumber, validateUrl } from '../lib/validation'
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -293,21 +294,24 @@ async function fetchImagesFromAllSources(query: string, count: number, seed: num
 // ── Register IPC handlers ──
 
 export function registerImageSearchHandlers(): void {
-  ipcMain.handle('image-search:open-browser', async (_event, query: string) => {
-    const url = `https://image.baidu.com/search/index?tn=baiduimage&word=${encodeURIComponent(query)}`
+  ipcMain.handle('image-search:open-browser', async (_event, query: unknown) => {
+    const safeQuery = validateString(query, 'query', { minLength: 1, maxLength: 200 })
+    const url = `https://image.baidu.com/search/index?tn=baiduimage&word=${encodeURIComponent(safeQuery)}`
     await shell.openExternal(url)
     return { success: true }
   })
 
-  ipcMain.handle('image-search:suggestions', async (_event, query: string, seed?: number) => {
-    const s = typeof seed === 'number' ? seed : Math.floor(Math.random() * 100)
-    const images = await fetchImagesFromAllSources(query, 4, s)
+  ipcMain.handle('image-search:suggestions', async (_event, query: unknown, seed?: unknown) => {
+    const safeQuery = validateString(query, 'query', { minLength: 1, maxLength: 200 })
+    const safeSeed = seed !== undefined ? validateNumber(seed, 'seed', { min: 0, max: 1000, integer: true }) : Math.floor(Math.random() * 100)
+    const images = await fetchImagesFromAllSources(safeQuery, 4, safeSeed)
     return { images }
   })
 
-  ipcMain.handle('image-search:download', async (_event, imageUrl: string) => {
+  ipcMain.handle('image-search:download', async (_event, imageUrl: unknown) => {
+    const safeUrl = validateUrl(imageUrl, 'imageUrl')
     try {
-      const resp = await fetch(imageUrl, {
+      const resp = await fetch(safeUrl, {
         headers: { 'User-Agent': UA },
         signal: AbortSignal.timeout(30000),
       })
@@ -321,13 +325,13 @@ export function registerImageSearchHandlers(): void {
     }
   })
 
-  // Pexels API key management
-  ipcMain.handle('image-search:set-pexels-key', async (_event, apiKey: string) => {
+  ipcMain.handle('image-search:set-pexels-key', async (_event, apiKey: unknown) => {
+    const safeApiKey = validateString(apiKey, 'apiKey', { minLength: 1, maxLength: 200 })
     const db = getDb()
     db.prepare(
       `INSERT INTO image_host_settings (key, value) VALUES ('pexels_api_key', ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-    ).run(apiKey)
+    ).run(safeApiKey)
     return { success: true }
   })
 

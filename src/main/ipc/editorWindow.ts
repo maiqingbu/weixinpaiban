@@ -1,6 +1,9 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
+import { validateString } from '../lib/validation'
+
+const MAX_HTML_LENGTH = 50 * 1024 * 1024
 
 let editorWindow: BrowserWindow | null = null
 let pendingContent: string | null = null
@@ -14,14 +17,16 @@ export function registerEditorWindowHandlers(): void {
     }
   })
 
-  ipcMain.handle('editor:open', (_event, content: string) => {
+  ipcMain.handle('editor:open', (_event, content: unknown) => {
+    const safeContent = validateString(content, 'content', { allowEmpty: true, maxLength: MAX_HTML_LENGTH })
+
     if (editorWindow && !editorWindow.isDestroyed()) {
       editorWindow.focus()
-      editorWindow.webContents.send('editor:set-content', content)
+      editorWindow.webContents.send('editor:set-content', safeContent)
       return
     }
 
-    pendingContent = content
+    pendingContent = safeContent
 
     const { width, height } = screen.getPrimaryDisplay().workAreaSize
     const winWidth = Math.min(1200, width - 200)
@@ -41,7 +46,6 @@ export function registerEditorWindowHandlers(): void {
       }
     })
 
-    // 移除默认菜单，让 Cmd+Z / Cmd+Y 等快捷键直达 TinyMCE
     editorWindow.setMenu(null)
 
     editorWindow.on('closed', () => {
@@ -60,22 +64,27 @@ export function registerEditorWindowHandlers(): void {
     }
   })
 
-  ipcMain.on('editor:save', (_event, html: string) => {
+  ipcMain.on('editor:save', (_event, html: unknown) => {
+    const safeHtml = validateString(html, 'html', { allowEmpty: true, maxLength: MAX_HTML_LENGTH })
     const mainWindow = BrowserWindow.getAllWindows().find(w => w !== editorWindow && !w.isDestroyed())
     if (mainWindow) {
-      mainWindow.webContents.send('editor:saved', html)
+      mainWindow.webContents.send('editor:saved', safeHtml)
     }
   })
 
-  // 主窗口推送内容更新到编辑器窗口
-  ipcMain.on('editor:push-content', (_event, html: string) => {
+  ipcMain.on('editor:push-content', (_event, html: unknown) => {
+    const safeHtml = validateString(html, 'html', { allowEmpty: true, maxLength: MAX_HTML_LENGTH })
     if (editorWindow && !editorWindow.isDestroyed()) {
-      editorWindow.webContents.send('editor:set-content', html)
+      editorWindow.webContents.send('editor:set-content', safeHtml)
     }
   })
 
   ipcMain.on('editor:close', () => {
     if (editorWindow && !editorWindow.isDestroyed()) {
+      const mainWindow = BrowserWindow.getAllWindows().find(w => w !== editorWindow && !w.isDestroyed())
+      if (mainWindow) {
+        mainWindow.webContents.send('editor:closed')
+      }
       editorWindow.close()
     }
   })

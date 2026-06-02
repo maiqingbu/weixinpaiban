@@ -4,6 +4,7 @@ import { statSync } from 'fs'
 import mammoth from 'mammoth'
 import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
+import { validateString, validateArray, validateObject, ValidationError } from '../lib/validation'
 
 // pdf-parse 依赖 @napi-rs/canvas，需要 DOMMatrix polyfill
 // 使用动态 import 避免启动时崩溃
@@ -295,17 +296,30 @@ async function importUrl(url: string): Promise<ImportResult> {
 }
 
 export function registerImportHandlers(): void {
-  // Open file dialog (runs in main process for security)
-  ipcMain.handle('import:open-file', async (_event, filters: { name: string; extensions: string[] }[]) => {
+  ipcMain.handle('import:open-file', async (_event, filters: unknown) => {
+    const safeFilters = validateArray(filters, 'filters', {
+      maxLength: 20,
+      itemValidator: (item, idx) => {
+        const f = validateObject<Record<string, unknown>>(item, `filters[${idx}]`)
+        return {
+          name: validateString(f.name, `filters[${idx}].name`, { minLength: 1, maxLength: 100 }),
+          extensions: validateArray(f.extensions, `filters[${idx}].extensions`, {
+            minLength: 1,
+            maxLength: 20,
+            itemValidator: (ext, eIdx) => validateString(ext, `filters[${idx}].extensions[${eIdx}]`, { minLength: 1, maxLength: 20 })
+          })
+        }
+      }
+    })
+
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
-      filters,
+      filters: safeFilters as { name: string; extensions: string[] }[],
     })
     if (result.canceled || result.filePaths.length === 0) {
       return null
     }
     const filePath = result.filePaths[0]
-    // Check file size
     try {
       const stat = statSync(filePath)
       if (stat.size > MAX_FILE_SIZE) {
@@ -317,35 +331,35 @@ export function registerImportHandlers(): void {
     return filePath
   })
 
-  // Import Word document
-  ipcMain.handle('import:word', async (_event, filePath: string): Promise<ImportResult> => {
-    if (!filePath.endsWith('.docx')) {
-      throw new Error('Word 导入只接受 .docx 文件')
+  ipcMain.handle('import:word', async (_event, filePath: unknown): Promise<ImportResult> => {
+    const safePath = validateString(filePath, 'filePath', { minLength: 1, maxLength: 4096 })
+    if (!safePath.endsWith('.docx')) {
+      throw new ValidationError('Word 导入只接受 .docx 文件', 'filePath')
     }
-    return importWord(filePath)
+    return importWord(safePath)
   })
 
-  // Import Markdown file
-  ipcMain.handle('import:markdown', async (_event, filePath: string): Promise<ImportResult> => {
-    if (!filePath.endsWith('.md') && !filePath.endsWith('.markdown')) {
-      throw new Error('Markdown 导入只接受 .md 或 .markdown 文件')
+  ipcMain.handle('import:markdown', async (_event, filePath: unknown): Promise<ImportResult> => {
+    const safePath = validateString(filePath, 'filePath', { minLength: 1, maxLength: 4096 })
+    if (!safePath.endsWith('.md') && !safePath.endsWith('.markdown')) {
+      throw new ValidationError('Markdown 导入只接受 .md 或 .markdown 文件', 'filePath')
     }
-    return importMarkdown(filePath)
+    return importMarkdown(safePath)
   })
 
-  // Import PDF file
-  ipcMain.handle('import:pdf', async (_event, filePath: string): Promise<ImportResult> => {
-    if (!filePath.endsWith('.pdf')) {
-      throw new Error('PDF 导入只接受 .pdf 文件')
+  ipcMain.handle('import:pdf', async (_event, filePath: unknown): Promise<ImportResult> => {
+    const safePath = validateString(filePath, 'filePath', { minLength: 1, maxLength: 4096 })
+    if (!safePath.endsWith('.pdf')) {
+      throw new ValidationError('PDF 导入只接受 .pdf 文件', 'filePath')
     }
-    return importPdf(filePath)
+    return importPdf(safePath)
   })
 
-  // Import from URL
-  ipcMain.handle('import:url', async (_event, url: string): Promise<ImportResult> => {
-    if (!url || !/^https?:\/\//i.test(url)) {
-      throw new Error('请输入有效的 URL（以 http:// 或 https:// 开头）')
+  ipcMain.handle('import:url', async (_event, url: unknown): Promise<ImportResult> => {
+    const safeUrl = validateString(url, 'url', { minLength: 1, maxLength: 2000 })
+    if (!/^https?:\/\//i.test(safeUrl)) {
+      throw new ValidationError('请输入有效的 URL（以 http:// 或 https:// 开头）', 'url')
     }
-    return importUrl(url)
+    return importUrl(safeUrl)
   })
 }

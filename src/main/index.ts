@@ -17,6 +17,8 @@ import { registerEditorWindowHandlers } from './ipc/editorWindow'
 import { registerTavilyHandlers } from './ipc/tavily'
 import { startPreviewServer } from './services/previewServer'
 import { getDb, listSavedStyles, createSavedStyle, updateSavedStyle, deleteSavedStyle, listSnapshots, createSnapshot, getSnapshot, getLatestSnapshotTime, listCustomThemes, createCustomTheme, updateCustomTheme, deleteCustomTheme, duplicateCustomTheme } from './db'
+import { setupGlobalErrorHandlers } from './lib/errorHandler'
+import { validateId, validateString, validateStringOrNull } from './lib/validation'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -67,6 +69,9 @@ function createWindow(): void {
 if (is.dev) {
     app.commandLine.appendSwitch('remote-debugging-port', '9222')
   }
+
+setupGlobalErrorHandlers()
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
 
@@ -93,7 +98,9 @@ app.whenReady().then(() => {
   getDb()
 
   // Start preview server
-  startPreviewServer()
+  startPreviewServer().catch((err) => {
+    console.error('[main] Failed to start preview server:', err)
+  })
 
   // Register IPC handlers
   registerIpcHandlers()
@@ -113,43 +120,64 @@ app.whenReady().then(() => {
   ipcMain.handle('style:list', () => {
     return listSavedStyles()
   })
-  ipcMain.handle('style:create', (_e, name: string, styles: string) => {
-    return createSavedStyle(name, styles)
+  ipcMain.handle('style:create', (_e, name: unknown, styles: unknown) => {
+    const safeName = validateString(name, 'name', { minLength: 1, maxLength: 200 })
+    const safeStyles = validateString(styles, 'styles', { minLength: 1, maxLength: 1024 * 1024 })
+    return createSavedStyle(safeName, safeStyles)
   })
-  ipcMain.handle('style:update', (_e, id: number, name: string) => {
-    return updateSavedStyle(id, name)
+  ipcMain.handle('style:update', (_e, id: unknown, name: unknown) => {
+    const safeId = validateId(id)
+    const safeName = validateString(name, 'name', { minLength: 1, maxLength: 200 })
+    return updateSavedStyle(safeId, safeName)
   })
-  ipcMain.handle('style:delete', (_e, id: number) => {
-    return deleteSavedStyle(id)
+  ipcMain.handle('style:delete', (_e, id: unknown) => {
+    const safeId = validateId(id)
+    return deleteSavedStyle(safeId)
   })
 
   // ── Article Snapshots ──
-  ipcMain.handle('snapshot:list', (_e, articleId: number) => {
-    return listSnapshots(articleId)
+  ipcMain.handle('snapshot:list', (_e, articleId: unknown) => {
+    const safeId = validateId(articleId)
+    return listSnapshots(safeId)
   })
-  ipcMain.handle('snapshot:create', (_e, articleId: number, content: string, wordCount: number) => {
-    return createSnapshot(articleId, content, wordCount)
+  ipcMain.handle('snapshot:create', (_e, articleId: unknown, content: unknown, wordCount: unknown) => {
+    const safeId = validateId(articleId)
+    const safeContent = validateString(content, 'content', { allowEmpty: true, maxLength: 50 * 1024 * 1024 })
+    const safeWordCount = typeof wordCount === 'number' ? Math.max(0, Math.floor(wordCount)) : 0
+    return createSnapshot(safeId, safeContent, safeWordCount)
   })
-  ipcMain.handle('snapshot:get', (_e, id: number) => {
-    return getSnapshot(id)
+  ipcMain.handle('snapshot:get', (_e, id: unknown) => {
+    const safeId = validateId(id)
+    return getSnapshot(safeId)
   })
-  ipcMain.handle('snapshot:latest-time', (_e, articleId: number) => {
-    return getLatestSnapshotTime(articleId)
+  ipcMain.handle('snapshot:latest-time', (_e, articleId: unknown) => {
+    const safeId = validateId(articleId)
+    return getLatestSnapshotTime(safeId)
   })
 
   // ── Custom Themes ──
   ipcMain.handle('custom-theme:list', () => listCustomThemes())
-  ipcMain.handle('custom-theme:create', (_e, id: string, name: string, css: string, baseThemeId: string | null) => {
-    return createCustomTheme(id, name, css, baseThemeId)
+  ipcMain.handle('custom-theme:create', (_e, id: unknown, name: unknown, css: unknown, baseThemeId: unknown) => {
+    const safeId = validateString(id, 'id', { minLength: 1, maxLength: 100 })
+    const safeName = validateString(name, 'name', { minLength: 1, maxLength: 200 })
+    const safeCss = validateString(css, 'css', { minLength: 1, maxLength: 1024 * 1024 })
+    const safeBase = validateStringOrNull(baseThemeId, 'baseThemeId')
+    return createCustomTheme(safeId, safeName, safeCss, safeBase)
   })
-  ipcMain.handle('custom-theme:update', (_e, id: string, name: string, css: string) => {
-    return updateCustomTheme(id, name, css)
+  ipcMain.handle('custom-theme:update', (_e, id: unknown, name: unknown, css: unknown) => {
+    const safeId = validateString(id, 'id', { minLength: 1, maxLength: 100 })
+    const safeName = validateString(name, 'name', { minLength: 1, maxLength: 200 })
+    const safeCss = validateString(css, 'css', { minLength: 1, maxLength: 1024 * 1024 })
+    return updateCustomTheme(safeId, safeName, safeCss)
   })
-  ipcMain.handle('custom-theme:delete', (_e, id: string) => {
-    return deleteCustomTheme(id)
+  ipcMain.handle('custom-theme:delete', (_e, id: unknown) => {
+    const safeId = validateString(id, 'id', { minLength: 1, maxLength: 100 })
+    return deleteCustomTheme(safeId)
   })
-  ipcMain.handle('custom-theme:duplicate', (_e, sourceId: string, newName: string) => {
-    return duplicateCustomTheme(sourceId, newName)
+  ipcMain.handle('custom-theme:duplicate', (_e, sourceId: unknown, newName: unknown) => {
+    const safeSourceId = validateString(sourceId, 'sourceId', { minLength: 1, maxLength: 100 })
+    const safeNewName = validateString(newName, 'newName', { minLength: 1, maxLength: 200 })
+    return duplicateCustomTheme(safeSourceId, safeNewName)
   })
 
   createWindow()
