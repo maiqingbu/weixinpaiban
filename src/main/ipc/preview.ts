@@ -11,7 +11,7 @@ import {
   updatePreviewContent,
   stopPreviewServer,
 } from '../services/previewServer'
-import { ValidationError, validateString, validateId } from '../lib/validation'
+import { ValidationError, validateString, validateHexId } from '../lib/validation'
 import { isSafeExternalUrl } from '../lib/urlSafety'
 
 const MAX_HTML_LENGTH = 50 * 1024 * 1024 // 50MB
@@ -44,28 +44,28 @@ export function registerPreviewHandlers(): void {
 
   ipcMain.handle('preview:delete', (_event, id: unknown) =>
     handle(() => {
-      const safeId = validateId(id, 'id')
+      const safeId = validateHexId(id, 'id')
       return deletePreview(safeId)
     })
   )
 
   ipcMain.handle('preview:getToken', (_event, id: unknown) =>
     handle(() => {
-      const safeId = validateId(id, 'id')
+      const safeId = validateHexId(id, 'id')
       return getPreviewToken(safeId)
     })
   )
 
   ipcMain.handle('preview:getUrl', (_event, id: unknown) =>
     handle(() => {
-      const safeId = validateId(id, 'id')
+      const safeId = validateHexId(id, 'id')
       return getPreviewUrl(safeId)
     })
   )
 
   ipcMain.handle('preview:update', (_event, id: unknown, html: unknown, title: unknown) =>
     handle(() => {
-      const safeId = validateId(id, 'id')
+      const safeId = validateHexId(id, 'id')
       const safeHtml = validateString(html, 'html', { minLength: 0, maxLength: MAX_HTML_LENGTH })
       const safeTitle = title
         ? validateString(title, 'title', { minLength: 0, maxLength: 256 })
