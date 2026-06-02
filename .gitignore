@@ -10,3 +10,4 @@ src-tauri/target 2/
 *.db-wal
 *.db-shm
 *.tsbuildinfo
+.codegraph/
