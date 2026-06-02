@@ -198,8 +198,6 @@ export function validateSafePath(value: unknown, fieldName: string, baseDir?: st
 }
 
 export interface AISchema {
-  providerId: string
-  modelId: string
   messages: Array<{ role: string; content: string }>
   temperature?: number
   maxTokens?: number
@@ -212,9 +210,15 @@ const AI_ROLES = ['system', 'user', 'assistant'] as const
 
 export function validateAIInput(value: unknown, fieldName: string): AISchema {
   const obj = validateObject<Record<string, unknown>>(value, fieldName)
+  // 注意：providerId / modelId 之前误加为必传字段，但 `ai:complete` IPC 协议
+  // 里 providerId 是顶层第二个参数（`validateString(providerId, ...)`），
+  // modelId 是从数据库 ai_keys.model_id 派生 + (input as any).model 覆盖，
+  // 永远不会读 opts.providerId / opts.modelId。
+  // 之前强校验会要求所有 renderer 端 aiComplete 调用方把 providerId 又塞到
+  // opts 里，违反 createAIComplete 的设计，导致 6 个调用方（ChecklistPanel
+  // 的摘要、contentGenerator、AIAssistant 3 处、AIBubbleMenu、Toolbar、
+  // titleAnalyzer）全部跑 AI 时抛 ValidationError: providerId must be a string。
   return {
-    providerId: validateString(obj.providerId, 'providerId', { minLength: 1, maxLength: 100 }),
-    modelId: validateString(obj.modelId, 'modelId', { minLength: 1, maxLength: 100 }),
     messages: validateArray(obj.messages, 'messages', {
       minLength: 1,
       maxLength: 200,
