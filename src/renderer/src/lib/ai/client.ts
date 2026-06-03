@@ -34,15 +34,39 @@ export function createAIComplete(): (
     let cleanupListeners: (() => void) | null = null
 
     const promise = (async (): Promise<string> => {
-      const result = await window.api?.aiComplete(safeProviderId, requestId, opts)
+      // ── 双保险 #1：invoke 自身 reject 也要 reject promise ──
+      // main 端 handler 现在已经把所有同步 throw 改 send ai:error，
+      // 理论上 invoke 不会 reject。但作为兜底（main 端代码升级回滚 / 新 bug），
+      // 这里把 invoke reject 也包装成 Error 抛出，让 ChecklistPanel catch 一定能看到。
+      let result: { requestId: string } | null | undefined
+      try {
+        result = await window.api?.aiComplete(safeProviderId, requestId, opts)
+      } catch (invokeErr: unknown) {
+        const err = invokeErr as Error
+        throw new Error(
+          `AI 请求初始化失败: ${err?.message || String(invokeErr) || '未知错误'}`
+        )
+      }
       if (!result) throw new Error('AI 功能不可用')
 
       return new Promise<string>((resolve: (v: string) => void, reject: (e: Error) => void) => {
         let settled = false
+        // 90s timeout 兜底：极端时序下（IPC 事件在 listener 注册前发出），
+        // promise 可能永远 pending → ChecklistPanel 一直显示"正在生成..."。
+        // 到时强制 reject，避免 UI 永远卡住。
+        const timeoutHandle = setTimeout(() => {
+          if (settled) return
+          console.warn(`[ai-client] request ${requestId} timeout (90s), force reject`)
+          settled = true
+          cleanupListeners?.()
+          cleanupListeners = null
+          reject(new Error('AI 请求超时（90s 未收到响应）'))
+        }, 90 * 1000)
 
         const settle = (fn: () => void): void => {
           if (settled) return
           settled = true
+          clearTimeout(timeoutHandle)
           cleanupListeners?.()
           cleanupListeners = null
           fn()
@@ -75,6 +99,7 @@ export function createAIComplete(): (
         window.api.onAiError(errorHandler)
 
         cleanupListeners = (): void => {
+          clearTimeout(timeoutHandle)
           window.api.offAiChunk(chunkHandler)
           window.api.offAiDone(doneHandler)
           window.api.offAiError(errorHandler)
@@ -95,16 +120,6 @@ export function createAIComplete(): (
       cleanupListeners?.()
       cleanupListeners = null
     }
-
-    // 防止 promise 静默不解析（极端情况兜底）：5min 后强制清理
-    const timeoutHandle = setTimeout(() => {
-      if (cleanupListeners) {
-        console.warn('[ai-client] request timeout, cleaning up listeners', requestId)
-        cleanupListeners()
-        cleanupListeners = null
-      }
-    }, 5 * 60 * 1000)
-    promise.finally(() => clearTimeout(timeoutHandle))
 
     return { requestId, promise, cancel }
   }

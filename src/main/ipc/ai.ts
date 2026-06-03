@@ -326,8 +326,19 @@ export function registerAiHandlers(): void {
           )
           return 'deepseek'
         })()
-  const safeRequestId = validateString(requestId, 'requestId', { minLength: 1, maxLength: 100 })
-  const input = validateAIInput(opts, 'opts')
+  // requestId 也要兜底（理论上 client.ts 一定生成 string，但 IPC 序列化极端情况兜一层）
+  const safeRequestId =
+    typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 100
+      ? requestId
+      : `ai-fallback-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+  // ── 关键修复：所有同步路径的错误必须 send ai:error，绝不能让 invoke reject。
+  // 历史 bug：之前 validateString(requestId) / validateAIInput(opts) / safeStorage.decryptString
+  // 任何一个 throw 都会让 ipcRenderer.invoke 在 renderer 端 reject，绕过 ai:error 事件，
+  // renderer 端 client.ts 等不到事件 → promise 永远 pending → ChecklistPanel "闪一下"
+  // 后一直显示"正在生成..."，错误信息不显示。
+  try {
+    const input = validateAIInput(opts, 'opts')
 
     const keyData = getDb()
       .prepare('SELECT encrypted_key, model_id FROM ai_keys WHERE provider_id = ?')
@@ -338,7 +349,15 @@ export function registerAiHandlers(): void {
       return { requestId: safeRequestId }
     }
 
-    const apiKey = safeStorage.decryptString(keyData.encrypted_key)
+    let apiKey: string
+    try {
+      apiKey = safeStorage.decryptString(keyData.encrypted_key)
+    } catch (decryptErr) {
+      const msg = decryptErr instanceof Error ? decryptErr.message : '密钥解密失败'
+      event.sender.send('ai:error', { requestId: safeRequestId, error: `密钥解密失败: ${msg}` })
+      return { requestId: safeRequestId }
+    }
+
     const model = (input as any).model || keyData.model_id || getDefaultModelForProvider(safeProviderId)
     const apiBase = getApiBaseForProvider(safeProviderId)
 
@@ -358,7 +377,12 @@ export function registerAiHandlers(): void {
           : await openAIRequest(apiBase, apiKey, model, input, controller.signal)
 
         if (!response.ok) {
-          const error = await response.text()
+          let error = ''
+          try {
+            error = await response.text()
+          } catch {
+            error = `HTTP ${response.status}`
+          }
           event.sender.send('ai:error', { requestId: safeRequestId, error: `请求失败 (${response.status}): ${error.slice(0, 300)}` })
           return
         }
@@ -390,7 +414,18 @@ export function registerAiHandlers(): void {
     })()
 
     return { requestId: safeRequestId }
-  })
+  } catch (initErr: unknown) {
+    // 兜底：任何 init 阶段意外 throw（validateAIInput 抛错等）都通过 ai:error 事件送出，
+    // 而不是让 ipcRenderer.invoke 拒绝导致 renderer 端 promise 永远 pending。
+    const err = initErr as Error
+    console.error('[ai:complete] init error:', err)
+    event.sender.send('ai:error', {
+      requestId: safeRequestId,
+      error: err.message || 'AI 请求初始化失败'
+    })
+    return { requestId: safeRequestId }
+  }
+})
 
   // ── AI Completion (simple, non-streaming) ──
 
