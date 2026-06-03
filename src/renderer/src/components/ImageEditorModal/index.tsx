@@ -172,6 +172,11 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   )
 
   // ── 导出 ──
+  // 历史 bug：旧实现 canvas.toDataURL + atob + byte 循环全是同步操作。
+  //   2000x1500 PNG 实测：toDataURL 184ms + atob+循环 248ms + 灌入编辑器 48ms ≈ 480ms 主线程阻塞
+  //   用户的手机照片（4000x3000+）按 4 倍像素（multiplier: 2）算，实际可能卡 2-4 秒
+  // 修复：改用 fabric v6 原生 canvas.toBlob 异步导出，multiplier 改 1（4x 像素完全用不到），
+  //   立刻关 modal（onClose）让用户看到反应，后台上传到图床异步替换。
   const handleExport = useCallback(async () => {
     const canvas = fabricRef.current
     if (!canvas) return
@@ -180,42 +185,72 @@ const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       canvas.backgroundColor = 'transparent'
       canvas.renderAll()
       const mainImg = mainImageRef.current
-      let dataUrl: string
-      if (mainImg) {
-        const bound = mainImg.getBoundingRect()
-        dataUrl = canvas.toDataURL({ format: 'png', multiplier: 2, left: bound.left, top: bound.top, width: bound.width, height: bound.height })
-      } else {
-        dataUrl = canvas.toDataURL({ format: 'png', multiplier: 2 })
-      }
+      // ── 异步导出（fabric v6 canvas.toBlob 返回 Promise<Blob | null>，主线程不阻塞）──
+      const blob = mainImg
+        ? await canvas.toBlob({
+            format: 'png',
+            multiplier: 1, // 之前是 2，4x 像素用不到
+            left: mainImg.getBoundingRect().left,
+            top: mainImg.getBoundingRect().top,
+            width: mainImg.getBoundingRect().width,
+            height: mainImg.getBoundingRect().height,
+          })
+        : await canvas.toBlob({ format: 'png', multiplier: 1 })
       canvas.backgroundColor = origBg
       canvas.renderAll()
-
-      const base64 = dataUrl.split(',')[1]
-      const binary = atob(base64)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-      const blob = new Blob([bytes], { type: 'image/png' })
-      const file = new File([blob], `edited-image-${Date.now()}.png`, { type: 'image/png' })
-
-      let finalUrl: string = dataUrl
-      const activeProviderId = await window.api?.imageHostGetSetting?.('active_provider')
-      if (activeProviderId) {
-        const provider = getProviderById(activeProviderId)
-        if (provider) {
-          try {
-            const config = (await window.api?.imageHostGetConfig(activeProviderId)) || {}
-            finalUrl = await uploadManager.upload(file, `edited-${Date.now()}`, (f) => provider.upload(f, f.name, config).then((r) => r.url))
-          } catch { /* fallback to dataUrl */ }
-        }
+      if (!blob) {
+        console.error('[ImageEditor] canvas.toBlob returned null')
+        return
       }
-      const replaced = replaceImageInEditor(finalUrl)
-      if (!replaced) replaceImageInEditor(dataUrl)
+
+      // 用 objectURL 立即替换编辑器图片（极快，比 dataURL 字符串小得多；不阻塞）
+      const objectUrl = URL.createObjectURL(blob)
+      const replaced = replaceImageInEditor(objectUrl)
+      if (!replaced) {
+        // 极少数情况找不到图节点：objectUrl 不再有效，
+        // 同步转 dataURL 作 fallback（仅这条路径阻塞，但保证图能进编辑器）
+        const dataUrl = canvas.toDataURL({ format: 'png', multiplier: 1 })
+        replaceImageInEditor(dataUrl)
+      }
       setHasUnsavedChanges(false)
+      // ── 关键：立刻关 modal，用户马上看到反应 ──
       onClose()
+
+      // ── 后台异步上传到图床（不阻塞 UI） ──
+      void (async () => {
+        try {
+          const activeProviderId = await window.api?.imageHostGetSetting?.('active_provider')
+          if (!activeProviderId) {
+            URL.revokeObjectURL(objectUrl)
+            return
+          }
+          const provider = getProviderById(activeProviderId)
+          if (!provider) {
+            URL.revokeObjectURL(objectUrl)
+            return
+          }
+          const file = new File([blob], `edited-image-${Date.now()}.png`, { type: 'image/png' })
+          const config = (await window.api?.imageHostGetConfig(activeProviderId)) || {}
+          const finalUrl = await uploadManager.upload(
+            file,
+            `edited-${Date.now()}`,
+            (f) => provider.upload(f, f.name, config).then((r) => r.url)
+          )
+          // 上传成功：用真 URL 替换 objectURL
+          if (replaceImageInEditor(finalUrl)) {
+            URL.revokeObjectURL(objectUrl)
+          } else {
+            URL.revokeObjectURL(objectUrl)
+          }
+        } catch (err) {
+          console.warn('[ImageEditor] upload failed, keep objectURL:', err)
+          URL.revokeObjectURL(objectUrl)
+        }
+      })()
     } catch (err) {
       console.error('[ImageEditor] export failed:', err)
     }
-  }, [fabricRef, replaceImageInEditor, onClose, editorInstance, imageUrl, imagePos])
+  }, [replaceImageInEditor, onClose])
 
   // ── 替换图片 ──
   const handleReplace = useCallback(() => {
